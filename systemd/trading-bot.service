@@ -1,0 +1,26 @@
+[Unit]
+Description=Trading System v2 (US stocks via Alpaca)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/trading-bot
+EnvironmentFile=/opt/trading-bot/.env
+ExecStart=/opt/trading-bot/venv/bin/python /opt/trading-bot/run_trading_system.py
+Restart=on-failure
+RestartSec=10s
+StandardOutput=append:/var/log/trading-bot/stdout.log
+StandardError=append:/var/log/trading-bot/stderr.log
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/trading-bot/data /var/log/trading-bot
+
+[Install]
+WantedBy=multi-user.target
