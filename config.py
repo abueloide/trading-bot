@@ -1,588 +1,538 @@
 #!/usr/bin/env python3
 """
-Configuration File - Complete Trading Bot Configuration
-Includes HERD-001 Market Crowding Detection and Database Integration
+Configuration File — US-stocks Trading System v2.
+
+Single source of truth for:
+- Alpaca API credentials and trading config
+- SIGNAL_WEIGHTS (definitive composite signal weights)
+- RISK_CONFIG (definitive risk parameters)
+- Crowding / anti-herding (HERD-001) preserved from v1
+- SQLite database path (replaces PostgreSQL from v1)
+- Feature flags
 """
 
 import os
-from typing import Dict, List, Any
+from typing import Any, Dict, List
+
 from dotenv import load_dotenv
+
 load_dotenv()
 
-# =============================================================================
-# CORE TRADING CONFIGURATION
-# =============================================================================
 
 # =============================================================================
-# EXISTING CONFIGURATION (FROM YOUR BASE)
+# CORE TRADING CONFIGURATION (US Stocks via Alpaca)
 # =============================================================================
 
-# Import your existing configuration
-try:
-    from config import (
-        get_api_credentials, TARGET_SYMBOLS, DECISION_THRESHOLDS, 
-        TOTAL_CAPITAL, RISK_PER_TRADE, ORDER_CONFIG
-    )
-    
-    # Use existing symbols
-    TRADING_PAIRS = TARGET_SYMBOLS
-    PRIMARY_PAIR = TARGET_SYMBOLS[0] if TARGET_SYMBOLS else 'BTCUSDT'
-    
-    # Use existing capital settings
-    MAX_POSITION_SIZE = RISK_PER_TRADE
-    
-    # Get API credentials using your existing function
-    credentials = get_api_credentials()
-    API_KEY = credentials.get('BINANCE_API', '')
-    API_SECRET = credentials.get('BINANCE_SECRET', '')
-    
-except ImportError:
-    # Fallback configuration if imports fail
-    TARGET_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT']
-    TRADING_PAIRS = TARGET_SYMBOLS
-    PRIMARY_PAIR = 'BTCUSDT'
-    TOTAL_CAPITAL = 1000.0
-    RISK_PER_TRADE = 0.02
-    MAX_POSITION_SIZE = 0.02
-    API_KEY = ''
-    API_SECRET = ''
+# Default universe — paper-trading-safe defaults; overridden by stock_universe.
+TARGET_SYMBOLS: List[str] = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA",
+    "JPM", "JNJ", "UNH", "WMT", "PG", "XOM", "CAT", "HD",
+]
+TRADING_PAIRS = TARGET_SYMBOLS  # alias for legacy code paths
+PRIMARY_PAIR = TARGET_SYMBOLS[0]
 
-# Additional settings
-TESTNET = os.getenv('USE_TESTNET', 'true').lower() == 'true'
-BASE_URL = 'https://testnet.binance.vision' if TESTNET else 'https://api.binance.com'
-MAX_DAILY_LOSS = 0.05  # 5% daily loss limit
-MAX_TOTAL_POSITIONS = 3
+# Capital and sizing
+TOTAL_CAPITAL = float(os.getenv("INITIAL_CAPITAL", "5000"))
+RISK_PER_TRADE = 0.02
+MAX_POSITION_SIZE = 0.25  # max 25% of portfolio per position
+MAX_POSITION_SIZE_USD = TOTAL_CAPITAL * MAX_POSITION_SIZE
 
-# Risk management
-STOP_LOSS_PERCENTAGE = 0.02  # 2% stop loss
-TAKE_PROFIT_PERCENTAGE = 0.04  # 4% take profit
-MAX_SLIPPAGE = 0.001  # 0.1% maximum slippage
-
-# Trading schedule
-TRADING_HOURS_START = 0  # 24/7 for crypto
-TRADING_HOURS_END = 24
+# Trade plumbing
+SCAN_INTERVAL = 300       # 5 minutes between scans
 MAX_DAILY_TRADES = 20
+MAX_TOTAL_POSITIONS = 4
+MAX_DAILY_LOSS = 0.05
+STOP_LOSS_PERCENTAGE = 0.02
+TAKE_PROFIT_PERCENTAGE = 0.06
+MAX_SLIPPAGE = 0.001
 
-# Data collection intervals
-DATA_COLLECTION_INTERVAL = 60  # seconds
-PRICE_HISTORY_LENGTH = 200
-VOLUME_HISTORY_LENGTH = 200
+# Market hours (NYSE) — strategies/executor enforce these.
+TRADING_HOURS_START = 9.5   # 9:30 ET
+TRADING_HOURS_END = 16.0    # 16:00 ET
+TRADING_DAYS = [0, 1, 2, 3, 4]  # Mon-Fri
+
 
 # =============================================================================
-# TECHNICAL ANALYSIS CONFIGURATION (COMPATIBLE WITH YOUR BASE)
+# ALPACA API CONFIGURATION
 # =============================================================================
 
-# Use your existing technical config if available
-try:
-    from config import TECHNICAL_CONFIG
-    RSI_PERIOD = TECHNICAL_CONFIG.get('RSI_PERIOD', 14)
-    RSI_OVERBOUGHT = TECHNICAL_CONFIG.get('RSI_OVERBOUGHT', 70)
-    RSI_OVERSOLD = TECHNICAL_CONFIG.get('RSI_OVERSOLD', 30)
-except ImportError:
-    # Fallback values
-    RSI_PERIOD = 14
-    RSI_OVERBOUGHT = 70
-    RSI_OVERSOLD = 30
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
+ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+ALPACA_PAPER = ALPACA_BASE_URL.startswith("https://paper-api.")
+ALPACA_RATE_LIMIT_PER_MIN = 200
+
+ALPACA_CONFIG: Dict[str, Any] = {
+    "api_key": ALPACA_API_KEY,
+    "secret_key": ALPACA_SECRET_KEY,
+    "base_url": ALPACA_BASE_URL,
+    "paper": ALPACA_PAPER,
+    "feed": os.getenv("ALPACA_FEED", "iex"),  # iex (free) or sip (paid)
+    "rate_limit_per_min": ALPACA_RATE_LIMIT_PER_MIN,
+}
+
+
+def get_api_credentials() -> Dict[str, str]:
+    """Compatibility shim: legacy code calls this for Binance creds."""
+    return {
+        "ALPACA_API_KEY": ALPACA_API_KEY,
+        "ALPACA_SECRET_KEY": ALPACA_SECRET_KEY,
+        # Aliases retained for any v1 code path not yet migrated.
+        "BINANCE_API": ALPACA_API_KEY,
+        "BINANCE_SECRET": ALPACA_SECRET_KEY,
+    }
+
+
+# =============================================================================
+# DATA COLLECTION CONFIGURATION
+# =============================================================================
+
+DATA_COLLECTION_INTERVAL = 60       # seconds between adaptive samples
+PRICE_HISTORY_LENGTH = 252          # ~1 year of daily bars
+VOLUME_HISTORY_LENGTH = 252
+
+
+# =============================================================================
+# TECHNICAL ANALYSIS CONFIGURATION
+# =============================================================================
+
+TECHNICAL_CONFIG = {
+    "RSI_PERIOD": 14,
+    "RSI_OVERBOUGHT": 70,
+    "RSI_OVERSOLD": 30,
+    "RSI_FAST_PERIOD": 2,        # for Strategy A/B (mean reversion)
+    "RSI_FAST_BUY": 10,
+    "RSI_FAST_SELL": 70,
+}
+RSI_PERIOD = TECHNICAL_CONFIG["RSI_PERIOD"]
+RSI_OVERBOUGHT = TECHNICAL_CONFIG["RSI_OVERBOUGHT"]
+RSI_OVERSOLD = TECHNICAL_CONFIG["RSI_OVERSOLD"]
 
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
-
 BOLLINGER_PERIOD = 20
 BOLLINGER_STD = 2
-
 EMA_SHORT = 10
 EMA_LONG = 50
 
-# Signal thresholds - use your existing decision thresholds
-try:
-    MIN_SIGNAL_STRENGTH = DECISION_THRESHOLDS.get('BUY', 6.5) / 10  # Convert to 0-1 scale
-    MIN_CONFIDENCE_LEVEL = 0.65
-except:
-    MIN_SIGNAL_STRENGTH = 0.6
-    MIN_CONFIDENCE_LEVEL = 0.65
+DECISION_THRESHOLDS = {
+    "BUY": 6.5,
+    "SELL": 3.5,
+    "HOLD_LOWER": 3.5,
+    "HOLD_UPPER": 6.5,
+}
+MIN_SIGNAL_STRENGTH = 0.6
+MIN_CONFIDENCE_LEVEL = 0.65
+SIGNAL_TIMEOUT_MINUTES = 60
 
-SIGNAL_TIMEOUT_MINUTES = 30
 
 # =============================================================================
-# HERD-001 MARKET CROWDING DETECTION CONFIGURATION
+# DEFINITIVE COMPOSITE SIGNAL WEIGHTS  (Section 4 of the v2 spec)
+# These REPLACE the legacy 35/25/20/15/5 scheme. Total must sum to 1.00.
 # =============================================================================
 
-# Enable/disable HERD-001 features
-ENABLE_CROWDING_DETECTION = os.getenv('ENABLE_CROWDING_DETECTION', 'true').lower() == 'true'
-ENABLE_ANTI_HERDING = os.getenv('ENABLE_ANTI_HERDING', 'true').lower() == 'true'
-ENABLE_TIMING_DECORRELATION = os.getenv('ENABLE_TIMING_DECORRELATION', 'true').lower() == 'true'
+SIGNAL_WEIGHTS: Dict[str, float] = {
+    "technical_score":     0.25,
+    "volume_confirmation": 0.15,
+    "regime_alignment":    0.10,
+    "crowding_safety":     0.10,
+    "risk_reward":         0.05,
+    "smart_money_signal":  0.15,
+    "news_sentiment":      0.10,
+    "macro_regime":        0.10,
+}
+assert abs(sum(SIGNAL_WEIGHTS.values()) - 1.0) < 1e-6, "SIGNAL_WEIGHTS must sum to 1.0"
 
-# HERD-001 Core Configuration
-CROWDING_CONFIG = {
-    # Market herding analysis
-    'correlation_analysis': {
-        'enabled': True,
-        'correlation_window': 100,
-        'correlation_threshold': 0.7,
-        'cross_asset_correlation_weight': 0.4
+
+# =============================================================================
+# RISK MANAGEMENT (DEFINITIVE — Section 6 of the v2 spec)
+# =============================================================================
+
+RISK_CONFIG: Dict[str, Any] = {
+    # Position-level
+    "max_position_pct": 0.25,
+    "max_risk_per_trade": 0.02,
+    "default_stop_loss_pct": 0.02,           # NOT applied to mean reversion
+    "default_take_profit_pct": 0.06,
+    "mean_reversion_max_hold_days": 10,
+    "momentum_rebalance_days": 21,
+
+    # Portfolio-level
+    "max_open_positions": 4,
+    "max_sector_exposure_pct": 0.40,
+    "min_cash_reserve_pct": 0.20,
+    "max_cash_reserve_pct": 0.50,
+
+    # Circuit breakers
+    "max_daily_loss_pct": 0.05,
+    "max_weekly_loss_pct": 0.08,
+
+    # PDT compliance
+    "max_day_trades_per_week": 3,
+    "pdt_equity_threshold": 25_000,
+
+    # Filters
+    "vix_rank_threshold": 50,
+    "market_trend_filter": True,
+    "earnings_blackout_days": 3,
+
+    # Psychology of Money — risk inversely proportional to portfolio size
+    "risk_scaling": {
+        "up_to_5k": 0.02,
+        "up_to_10k": 0.015,
+        "above_10k": 0.01,
     },
-    
-    # Sentiment herding analysis
-    'sentiment_analysis': {
-        'enabled': True,
-        'sentiment_threshold': 0.7,
-        'extreme_rsi_threshold': 80,
-        'fear_greed_weight': 0.3,
-        'momentum_alignment_weight': 0.4
-    },
-    
-    # Volume herding analysis
-    'volume_analysis': {
-        'enabled': True,
-        'volume_spike_threshold': 2.0,
-        'volume_trend_window': 20,
-        'burst_activity_threshold': 3.0
-    },
-    
-    # Trade crowding analysis
-    'trade_crowding': {
-        'enabled': True,
-        'order_book_clustering_threshold': 0.7,
-        'directional_bias_threshold': 0.8,
-        'size_concentration_threshold': 0.6,
-        'timing_correlation_window': 50
-    },
-    
-    # Responsibility scoring
-    'responsibility_scoring': {
-        'market_weight': 0.6,
-        'trade_weight': 0.4,
-        'confidence_adjustment': True,
-        'regime_adjustment': True
-    }
 }
 
-# HERD-001 Decision Thresholds
+
+# =============================================================================
+# HERD-001 MARKET CROWDING DETECTION — preserved from v1
+# =============================================================================
+
+ENABLE_CROWDING_DETECTION = os.getenv("ENABLE_CROWDING_DETECTION", "true").lower() == "true"
+ENABLE_ANTI_HERDING = os.getenv("ENABLE_ANTI_HERDING", "true").lower() == "true"
+
+CROWDING_CONFIG: Dict[str, Any] = {
+    "correlation_analysis": {
+        "enabled": True,
+        "correlation_window": 100,
+        "correlation_threshold": 0.7,
+        "cross_asset_correlation_weight": 0.4,
+    },
+    "sentiment_analysis": {
+        "enabled": True,
+        "sentiment_threshold": 0.7,
+        "extreme_rsi_threshold": 80,
+        "fear_greed_weight": 0.3,
+        "momentum_alignment_weight": 0.4,
+    },
+    "volume_analysis": {
+        "enabled": True,
+        "volume_spike_threshold": 2.0,
+        "volume_trend_window": 20,
+        "burst_activity_threshold": 3.0,
+    },
+    "trade_crowding": {
+        "enabled": True,
+        "order_book_clustering_threshold": 0.7,
+        "directional_bias_threshold": 0.8,
+        "size_concentration_threshold": 0.6,
+        "timing_correlation_window": 50,
+    },
+    "responsibility_scoring": {
+        "market_weight": 0.6,
+        "trade_weight": 0.4,
+        "confidence_adjustment": True,
+        "regime_adjustment": True,
+    },
+}
+
 CROWDING_THRESHOLDS = {
-    'extreme_crowding': 0.8,    # Block trades
-    'high_crowding': 0.6,       # Reduce size significantly
-    'moderate_crowding': 0.4,   # Apply timing delays
-    'low_crowding': 0.2         # Normal execution
+    "extreme_crowding": 0.85,    # block
+    "high_crowding": 0.6,        # reduce size
+    "moderate_crowding": 0.4,    # delay
+    "low_crowding": 0.2,
 }
 
-# HERD-001 Response Configuration
-ANTI_HERDING_CONFIG = {
-    # Timing decorrelation
-    'timing_delays': {
-        'max_delay_seconds': 180,
-        'min_delay_seconds': 0,
-        'delay_randomization': True,
-        'delay_distribution': 'uniform'  # 'uniform', 'exponential', 'normal'
+# NOTE: TIMING_DECORRELATION removed in v2 — irrelevant for daily stock scans.
+ANTI_HERDING_CONFIG: Dict[str, Any] = {
+    "size_adjustments": {
+        "min_size_factor": 0.4,
+        "max_size_factor": 1.0,
+        "adjustment_curve": "linear",
     },
-    
-    # Position size adjustments
-    'size_adjustments': {
-        'min_size_factor': 0.4,     # Minimum 40% of original size
-        'max_size_factor': 1.0,     # Maximum 100% of original size
-        'adjustment_curve': 'linear' # 'linear', 'exponential', 'logarithmic'
+    "trade_blocking": {
+        "enable_blocking": True,
+        "block_threshold": 0.85,
+        "emergency_block_threshold": 0.95,
     },
-    
-    # Trade blocking
-    'trade_blocking': {
-        'enable_blocking': True,
-        'block_threshold': 0.85,
-        'block_duration_minutes': 15,
-        'emergency_block_threshold': 0.95
+    "regime_adjustments": {
+        "extreme_herding_multiplier": 1.3,
+        "high_volatility_multiplier": 1.2,
+        "low_volatility_multiplier": 1.1,
+        "normal_market_multiplier": 0.8,
     },
-    
-    # Market regime adjustments
-    'regime_adjustments': {
-        'extreme_herding_multiplier': 1.3,
-        'high_volatility_multiplier': 1.2,
-        'low_volatility_multiplier': 1.1,
-        'normal_market_multiplier': 0.8
-    }
 }
 
-# HERD-001 Performance Configuration
 CROWDING_PERFORMANCE_CONFIG = {
-    'analysis_cache_ttl': 300,      # 5 minutes
-    'max_cache_size': 100,
-    'analysis_timeout_seconds': 5,
-    'fallback_on_timeout': True,
-    'fallback_responsibility_score': 0.5
+    "analysis_cache_ttl": 300,
+    "max_cache_size": 100,
+    "analysis_timeout_seconds": 5,
+    "fallback_on_timeout": True,
+    "fallback_responsibility_score": 0.5,
 }
+
 
 # =============================================================================
-# DATABASE INTEGRATION CONFIGURATION
+# DATABASE (SQLite — replaces PostgreSQL from v1)
 # =============================================================================
 
-# Enable/disable database features
-ENABLE_DATABASE = os.getenv('ENABLE_DATABASE', 'true').lower() == 'true'
-DATABASE_LOGGING = os.getenv('DATABASE_LOGGING', 'true').lower() == 'true'
+ENABLE_DATABASE = os.getenv("ENABLE_DATABASE", "true").lower() == "true"
+DATABASE_LOGGING = os.getenv("DATABASE_LOGGING", "true").lower() == "true"
 
-# Database connection configuration
-DATABASE_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': int(os.getenv('DB_PORT', '5432')),
-    'database': os.getenv('DB_NAME', 'crypto_trading_db'),
-    'user': os.getenv('DB_USER', 'trading_bot_app'),
-    'password': os.getenv('DB_PASSWORD', 'TradingBot2025'),
-    'sslmode': os.getenv('DB_SSLMODE', 'prefer'),
-    'connect_timeout': 10,
-    'application_name': 'crypto_trading_bot'
+DB_TYPE = os.getenv("DB_TYPE", "sqlite")
+DB_PATH = os.getenv("DB_PATH", "data/trading.db")
+
+DATABASE_CONFIG: Dict[str, Any] = {
+    "type": DB_TYPE,
+    "path": DB_PATH,
 }
 
-# Database connection pool configuration
-DB_POOL_CONFIG = {
-    'minconn': 2,
-    'maxconn': 10,
-    'connection_retry_attempts': 3,
-    'connection_retry_delay': 5,
-    'health_check_interval': 300  # 5 minutes
-}
-
-# Database logging configuration
 DB_LOGGING_CONFIG = {
-    'log_market_data': True,
-    'log_trades': True,
-    'log_signals': True,
-    'log_crowding_analysis': True,
-    'log_regime_changes': True,
-    'log_system_health': True,
-    'batch_size': 100,
-    'flush_interval_seconds': 60
+    "log_market_data": True,
+    "log_trades": True,
+    "log_signals": True,
+    "log_crowding_analysis": True,
+    "log_regime_changes": True,
+    "log_system_health": True,
+    "batch_size": 100,
+    "flush_interval_seconds": 60,
 }
 
+
 # =============================================================================
-# MARKET REGIME DETECTION CONFIGURATION
+# REGIME / MICROSTRUCTURE / CRISIS — preserved feature flags
 # =============================================================================
 
-# Enable market regime detection
-ENABLE_REGIME_DETECTION = os.getenv('ENABLE_REGIME_DETECTION', 'true').lower() == 'true'
+ENABLE_REGIME_DETECTION = os.getenv("ENABLE_REGIME_DETECTION", "true").lower() == "true"
+ENABLE_MICROSTRUCTURE = os.getenv("ENABLE_MICROSTRUCTURE", "true").lower() == "true"
+ENABLE_CRISIS_DETECTION = os.getenv("ENABLE_CRISIS_DETECTION", "true").lower() == "true"
 
 REGIME_CONFIG = {
-    'volatility_windows': [20, 50, 100],
-    'trend_detection_period': 50,
-    'regime_classification': {
-        'bull_market_threshold': 0.15,
-        'bear_market_threshold': -0.15,
-        'sideways_volatility_threshold': 0.02,
-        'high_volatility_threshold': 0.05
+    "enabled": ENABLE_REGIME_DETECTION,
+    "volatility_windows": [20, 50, 100],
+    "trend_detection_period": 50,
+    "regime_classification": {
+        "bull_market_threshold": 0.15,
+        "bear_market_threshold": -0.15,
+        "sideways_volatility_threshold": 0.02,
+        "high_volatility_threshold": 0.05,
     },
-    'regime_confidence_threshold': 0.7,
-    'regime_persistence_periods': 5
+    "regime_confidence_threshold": 0.7,
+    "regime_persistence_periods": 5,
+    "update_interval": 3600,
 }
-
-# =============================================================================
-# CRISIS DETECTION CONFIGURATION
-# =============================================================================
-
-# Enable crisis detection
-ENABLE_CRISIS_DETECTION = os.getenv('ENABLE_CRISIS_DETECTION', 'true').lower() == 'true'
 
 CRISIS_CONFIG = {
-    'flash_crash_detection': {
-        'price_drop_threshold': 0.10,      # 10% drop
-        'time_window_minutes': 15,
-        'volume_spike_threshold': 5.0
+    "enabled": ENABLE_CRISIS_DETECTION,
+    "check_interval": 300,
+    "auto_shutdown": True,
+    "flash_crash_detection": {
+        "price_drop_threshold": 0.10,
+        "time_window_minutes": 15,
+        "volume_spike_threshold": 5.0,
     },
-    'liquidity_crisis_detection': {
-        'bid_ask_spread_threshold': 0.005, # 0.5%
-        'order_book_depth_threshold': 0.3,
-        'market_impact_threshold': 0.01
+    "liquidity_crisis_detection": {
+        "bid_ask_spread_threshold": 0.005,
+        "market_impact_threshold": 0.01,
     },
-    'volatility_crisis_detection': {
-        'volatility_spike_threshold': 3.0,
-        'volatility_persistence_periods': 3
-    }
+    "volatility_crisis_detection": {
+        "volatility_spike_threshold": 3.0,
+        "volatility_persistence_periods": 3,
+    },
 }
-
-# =============================================================================
-# MICROSTRUCTURE DATA CONFIGURATION
-# =============================================================================
-
-# Enable microstructure data collection
-ENABLE_MICROSTRUCTURE = os.getenv('ENABLE_MICROSTRUCTURE', 'true').lower() == 'true'
 
 MICROSTRUCTURE_CONFIG = {
-    'order_book_depth_levels': 20,
-    'order_book_update_interval': 1,    # seconds
-    'trade_flow_analysis_window': 300,  # 5 minutes
-    'market_impact_estimation': True,
-    'liquidity_metrics': {
-        'bid_ask_spread': True,
-        'effective_spread': True,
-        'price_impact': True,
-        'order_book_imbalance': True
-    }
+    # Alpaca free tier is L1 only — depth-based metrics use fallbacks.
+    "order_book_depth_levels": 1,
+    "trade_flow_analysis_window": 300,
+    "market_impact_estimation": True,
+    "liquidity_metrics": {
+        "bid_ask_spread": True,
+        "effective_spread": True,
+        "price_impact": True,
+        "order_book_imbalance": True,
+    },
 }
 
-# =============================================================================
-# SYSTEM MONITORING CONFIGURATION
-# =============================================================================
-
-# System health monitoring
-SYSTEM_MONITORING_CONFIG = {
-    'health_check_interval': 60,        # seconds
-    'performance_logging_interval': 300, # 5 minutes
-    'error_alert_threshold': 5,
-    'memory_usage_alert_threshold': 0.8, # 80%
-    'cpu_usage_alert_threshold': 0.9,    # 90%
+MANIPULATION_CONFIG = {
+    "enabled": True,
+    "sensitivity": "MEDIUM",
+    "block_trades": True,
 }
 
-# Logging configuration
+
+# =============================================================================
+# ALTERNATIVE DATA & NEWS — Phase 4/5 config
+# =============================================================================
+
+ENABLE_ALTERNATIVE_DATA = os.getenv("ENABLE_ALTERNATIVE_DATA", "false").lower() == "true"
+ENABLE_NEWS_INTELLIGENCE = os.getenv("ENABLE_NEWS_INTELLIGENCE", "false").lower() == "true"
+
+ALTERNATIVE_DATA_CONFIG: Dict[str, Any] = {
+    "enabled": ENABLE_ALTERNATIVE_DATA,
+    "quiver_token": os.getenv("QUIVER_API_TOKEN", ""),
+    "congress_lookback_days": 90,
+    "insider_window_days": 30,
+    # Backtest delays — congress filings have a 45-day lag, insider 2 days.
+    "congress_filing_lag_days": 45,
+    "insider_filing_lag_days": 2,
+    "cache_ttl_seconds": 86_400,  # daily/weekly data, cache aggressively
+    "fallback_score": 0.5,
+}
+
+SMART_MONEY_WEIGHTS: Dict[str, float] = {
+    "insider_cluster": 0.40,
+    "congress_direction": 0.30,
+    "institutional_flow": 0.20,
+    "dark_pool": 0.10,
+}
+assert abs(sum(SMART_MONEY_WEIGHTS.values()) - 1.0) < 1e-6
+
+NEWS_CONFIG: Dict[str, Any] = {
+    "enabled": ENABLE_NEWS_INTELLIGENCE,
+    "anthropic_api_key": os.getenv("ANTHROPIC_API_KEY", ""),
+    "alphavantage_api_key": os.getenv("ALPHAVANTAGE_API_KEY", ""),
+    "claude_max_calls_per_hour": 30,
+    "finbert_weight": 0.6,
+    "claude_weight": 0.4,
+    "min_impact_magnitude": 0.6,
+    "min_confidence": 0.7,
+    "narrative_window_days": 30,
+}
+
+
+# =============================================================================
+# BACKTESTING
+# =============================================================================
+
+BACKTESTING_CONFIG: Dict[str, Any] = {
+    "enabled": True,
+    "data_source": "alpaca",       # alpaca | yfinance
+    "fallback_data_source": "yfinance",
+    "in_sample_months": 24,
+    "out_of_sample_months": 6,
+    "transaction_cost_pct": 0.0005,  # 0.05% slippage per side, ALWAYS
+    "results_dir": "backtesting/results",
+    "baseline_symbol": "SPY",
+}
+
+
+# =============================================================================
+# TELEGRAM
+# =============================================================================
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+ENABLE_TELEGRAM = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+
+# =============================================================================
+# LOGGING / MONITORING
+# =============================================================================
+
 LOGGING_CONFIG = {
-    'level': os.getenv('LOG_LEVEL', 'INFO'),
-    'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    'file_logging': True,
-    'log_file': 'trading_bot.log',
-    'max_file_size': 10 * 1024 * 1024,  # 10MB
-    'backup_count': 5,
-    'console_logging': True
+    "level": os.getenv("LOG_LEVEL", "INFO"),
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file_logging": True,
+    "log_file": "trading_bot.log",
+    "max_file_size": 10 * 1024 * 1024,
+    "backup_count": 5,
+    "console_logging": True,
 }
 
-# Alert configuration
+SYSTEM_MONITORING_CONFIG = {
+    "health_check_interval": 60,
+    "performance_logging_interval": 300,
+    "error_alert_threshold": 5,
+    "memory_usage_alert_threshold": 0.8,
+    "cpu_usage_alert_threshold": 0.9,
+}
+
 ALERT_CONFIG = {
-    'enable_alerts': os.getenv('ENABLE_ALERTS', 'false').lower() == 'true',
-    'email_alerts': os.getenv('ENABLE_EMAIL_ALERTS', 'false').lower() == 'true',
-    'webhook_alerts': os.getenv('ENABLE_WEBHOOK_ALERTS', 'false').lower() == 'true',
-    'alert_thresholds': {
-        'large_loss': 0.05,              # 5% loss
-        'system_error': True,
-        'database_connection_loss': True,
-        'exchange_connection_loss': True
-    }
+    "enable_alerts": os.getenv("ENABLE_ALERTS", "false").lower() == "true",
+    "alert_thresholds": {
+        "large_loss": 0.05,
+        "system_error": True,
+        "database_connection_loss": True,
+        "exchange_connection_loss": True,
+    },
 }
 
-# =============================================================================
-# BACKTESTING AND SIMULATION CONFIGURATION
-# =============================================================================
-
-BACKTESTING_CONFIG = {
-    'enable_backtesting': False,
-    'historical_data_start': '2023-01-01',
-    'historical_data_end': '2024-01-01',
-    'initial_capital': 10000,
-    'commission_rate': 0.001,  # 0.1% commission
-    'slippage_model': 'linear'
-}
-
-# Paper trading configuration
-PAPER_TRADING_CONFIG = {
-    'enable_paper_trading': os.getenv('PAPER_TRADING', 'false').lower() == 'true',
-    'simulated_capital': 10000,
-    'realistic_execution_delays': True,
-    'simulated_slippage': True,
-    'order_fill_simulation': 'market_impact'
-}
 
 # =============================================================================
 # FEATURE FLAGS
 # =============================================================================
 
-# Feature toggle system
-FEATURE_FLAGS = {
-    # Core features
-    'enable_trading': os.getenv('ENABLE_TRADING', 'true').lower() == 'true',
-    'enable_stop_losses': True,
-    'enable_take_profits': True,
-    
-    # HERD-001 features
-    'enable_herd001': ENABLE_CROWDING_DETECTION,
-    'enable_market_herding_analysis': True,
-    'enable_trade_crowding_analysis': True,
-    'enable_timing_decorrelation': True,
-    'enable_position_sizing_adjustment': True,
-    'enable_trade_blocking': True,
-    
-    # Database features
-    'enable_database_logging': DATABASE_LOGGING,
-    'enable_analytics': True,
-    'enable_performance_tracking': True,
-    
-    # Advanced features
-    'enable_regime_detection': ENABLE_REGIME_DETECTION,
-    'enable_crisis_detection': ENABLE_CRISIS_DETECTION,
-    'enable_microstructure_analysis': ENABLE_MICROSTRUCTURE,
-    
-    # Development features
-    'enable_debug_mode': os.getenv('DEBUG_MODE', 'false').lower() == 'true',
-    'enable_verbose_logging': os.getenv('VERBOSE_LOGGING', 'false').lower() == 'true',
-    'enable_performance_profiling': os.getenv('ENABLE_PROFILING', 'false').lower() == 'true'
+FEATURE_FLAGS: Dict[str, bool] = {
+    "enable_trading": os.getenv("ENABLE_TRADING", "true").lower() == "true",
+    "enable_stop_losses": True,
+    "enable_take_profits": True,
+    "enable_herd001": ENABLE_CROWDING_DETECTION,
+    "enable_market_herding_analysis": True,
+    "enable_trade_crowding_analysis": True,
+    "enable_position_sizing_adjustment": True,
+    "enable_trade_blocking": True,
+    "enable_database_logging": DATABASE_LOGGING,
+    "enable_analytics": True,
+    "enable_performance_tracking": True,
+    "enable_regime_detection": ENABLE_REGIME_DETECTION,
+    "enable_crisis_detection": ENABLE_CRISIS_DETECTION,
+    "enable_microstructure_analysis": ENABLE_MICROSTRUCTURE,
+    "enable_alternative_data": ENABLE_ALTERNATIVE_DATA,
+    "enable_news_intelligence": ENABLE_NEWS_INTELLIGENCE,
+    "enable_debug_mode": os.getenv("DEBUG_MODE", "false").lower() == "true",
+    "enable_verbose_logging": os.getenv("VERBOSE_LOGGING", "false").lower() == "true",
 }
 
+
 # =============================================================================
-# VALIDATION AND SAFETY CHECKS
+# CONFIG ACCESSORS / VALIDATION
 # =============================================================================
 
-def validate_configuration():
-    """Validate configuration settings - compatible with existing base"""
-    errors = []
-    
-    # Test if we can get API credentials
-    try:
-        creds = get_api_credentials() if 'get_api_credentials' in globals() else {}
-        if not creds.get('BINANCE_API') and not TESTNET:
-            errors.append("Binance API credentials missing for live trading")
-    except Exception as e:
-        errors.append(f"Failed to get API credentials: {e}")
-    
-    # Validate basic settings
-    try:
-        if TOTAL_CAPITAL <= 0:
-            errors.append("Total capital must be positive")
-        
-        if MAX_POSITION_SIZE <= 0 or MAX_POSITION_SIZE > 1:
-            errors.append("Max position size must be between 0 and 1")
-        
-        if not TRADING_PAIRS:
-            errors.append("At least one trading pair must be configured")
-        
-        if PRIMARY_PAIR not in TRADING_PAIRS:
-            errors.append("Primary pair must be in trading pairs list")
-            
-    except Exception as e:
-        errors.append(f"Configuration validation error: {e}")
-    
+def validate_configuration() -> List[str]:
+    errors: List[str] = []
+    if not ALPACA_PAPER and not ALPACA_API_KEY:
+        errors.append("ALPACA_API_KEY missing for live trading")
+    if TOTAL_CAPITAL <= 0:
+        errors.append("INITIAL_CAPITAL must be positive")
+    if not TRADING_PAIRS:
+        errors.append("At least one symbol must be configured")
     return errors
 
-# =============================================================================
-# CONFIGURATION EXPORT
-# =============================================================================
 
 def get_trading_config() -> Dict[str, Any]:
-    """Get core trading configuration - compatible with existing base"""
-    try:
-        creds = get_api_credentials() if 'get_api_credentials' in globals() else {}
-        return {
-            'api_key': creds.get('BINANCE_API', API_KEY),
-            'api_secret': creds.get('BINANCE_SECRET', API_SECRET),
-            'base_url': BASE_URL,
-            'trading_pairs': TRADING_PAIRS,
-            'total_capital': TOTAL_CAPITAL,
-            'max_position_size': MAX_POSITION_SIZE,
-            'stop_loss_percentage': STOP_LOSS_PERCENTAGE,
-            'take_profit_percentage': TAKE_PROFIT_PERCENTAGE
-        }
-    except Exception as e:
-        logger.error(f"Error getting trading config: {e}")
-        return {
-            'api_key': API_KEY,
-            'api_secret': API_SECRET,
-            'base_url': BASE_URL,
-            'trading_pairs': TRADING_PAIRS,
-            'total_capital': TOTAL_CAPITAL,
-            'max_position_size': MAX_POSITION_SIZE,
-            'stop_loss_percentage': STOP_LOSS_PERCENTAGE,
-            'take_profit_percentage': TAKE_PROFIT_PERCENTAGE
-        }
+    return {
+        "api_key": ALPACA_API_KEY,
+        "api_secret": ALPACA_SECRET_KEY,
+        "base_url": ALPACA_BASE_URL,
+        "paper": ALPACA_PAPER,
+        "trading_pairs": TRADING_PAIRS,
+        "total_capital": TOTAL_CAPITAL,
+        "max_position_size": MAX_POSITION_SIZE,
+        "stop_loss_percentage": STOP_LOSS_PERCENTAGE,
+        "take_profit_percentage": TAKE_PROFIT_PERCENTAGE,
+    }
+
 
 def get_herd001_config() -> Dict[str, Any]:
-    """Get HERD-001 configuration"""
     return {
-        'enabled': ENABLE_CROWDING_DETECTION,
-        'crowding_config': CROWDING_CONFIG,
-        'thresholds': CROWDING_THRESHOLDS,
-        'anti_herding_config': ANTI_HERDING_CONFIG,
-        'performance_config': CROWDING_PERFORMANCE_CONFIG
+        "enabled": ENABLE_CROWDING_DETECTION,
+        "crowding_config": CROWDING_CONFIG,
+        "thresholds": CROWDING_THRESHOLDS,
+        "anti_herding_config": ANTI_HERDING_CONFIG,
+        "performance_config": CROWDING_PERFORMANCE_CONFIG,
     }
+
 
 def get_database_config() -> Dict[str, Any]:
-    """Get database configuration"""
     return {
-        'enabled': ENABLE_DATABASE,
-        'connection': DATABASE_CONFIG,
-        'pool': DB_POOL_CONFIG,
-        'logging': DB_LOGGING_CONFIG
+        "enabled": ENABLE_DATABASE,
+        "type": DB_TYPE,
+        "path": DB_PATH,
     }
 
-# =============================================================================
-# RUNTIME CONFIGURATION VALIDATION
-# =============================================================================
 
-# Validate configuration on import
+def get_signal_weights() -> Dict[str, float]:
+    return dict(SIGNAL_WEIGHTS)
+
+
+def get_risk_config() -> Dict[str, Any]:
+    return dict(RISK_CONFIG)
+
+
+# Run a soft validation on import; do not raise unless the user opts in.
 _config_errors = validate_configuration()
-if _config_errors:
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.error("Configuration validation errors:")
-    for error in _config_errors:
-        logger.error(f"  - {error}")
-    
-    if not os.getenv('IGNORE_CONFIG_ERRORS', 'false').lower() == 'true':
-        raise ValueError(f"Configuration validation failed: {_config_errors}")
-
-# =============================================================================
-# END OF CONFIGURATION
-# =============================================================================
-# =============================================================================
-# MISSING CRITICAL PARAMETERS - ADDED BY FIX
-# =============================================================================
-
-# Position and Risk Management
-MAX_POSITION_SIZE_USD = 50.0  # Safe initial amount for testing
-SCAN_INTERVAL = 300  # 5 minutes between scans
-
-# API Base URLs (if missing)
-if 'BASE_URL' not in globals():
-    BASE_URL = "https://api.binance.com"
-
-# Ensure API credentials are properly set
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
-BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
-
-if not BINANCE_API_KEY:
-    print("⚠️ Warning: BINANCE_API_KEY not set - using demo mode")
-    BINANCE_API_KEY = "demo_key_for_testing"
-
-if not BINANCE_SECRET_KEY:
-    print("⚠️ Warning: BINANCE_SECRET_KEY not set - using demo mode")
-    BINANCE_SECRET_KEY = "demo_secret_for_testing"
-
-# Safety validation function
-def validate_config():
-    """Validate configuration parameters"""
-    issues = []
-    
-    if not MAX_POSITION_SIZE_USD or MAX_POSITION_SIZE_USD <= 0:
-        issues.append("MAX_POSITION_SIZE_USD must be > 0")
-    
-    if not SCAN_INTERVAL or SCAN_INTERVAL <= 0:
-        issues.append("SCAN_INTERVAL must be > 0")
-        
-    if not TARGET_SYMBOLS:
-        issues.append("TARGET_SYMBOLS cannot be empty")
-    
-    return len(issues) == 0, issues
-
-# Regime configuration
-REGIME_CONFIG = {
-    'enabled': True,
-    'update_interval': 3600,  # 1 hour
-    'confidence_threshold': 0.6
-}
-
-# Crisis configuration  
-CRISIS_CONFIG = {
-    'enabled': True,
-    'check_interval': 300,  # 5 minutes
-    'auto_shutdown': True
-}
-
-# Manipulation configuration
-MANIPULATION_CONFIG = {
-    'enabled': True,
-    'sensitivity': 'MEDIUM',
-    'block_trades': True
-}
-
-print("✅ Configuration parameters added successfully")
-
-# Override API keys directly (hardcoded)
-os.environ['BINANCE_API_KEY'] = 'cJh2vz60bb5O6RR2BqcZTuCokMjVW1HIWA0pikVLf8xiPbNnoq2SSvGozpbyZoPj'
-os.environ['BINANCE_SECRET_KEY'] = 'bEnTaarhiD0QHqBpwferv0a4SeKrW5XT3b91NyQeIEBYqnTQkf3BRDtSRNSE2NeJ'
-
-# =============================================================================
-# TELEGRAM CONFIGURATION
-# =============================================================================
-import os
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '7839884699:AAEowznxtXpRLuTEqZk9rIcT5K3Gv5QCXlE')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '7266808827')
-ENABLE_TELEGRAM = True
+if _config_errors and os.getenv("STRICT_CONFIG", "false").lower() == "true":
+    raise ValueError(f"Configuration validation failed: {_config_errors}")

@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 # Import configuration with enhanced fallbacks
 try:
     from config import (
-        get_api_credentials, ENABLE_DATABASE, ENABLE_MICROSTRUCTURE, 
-        DATABASE_LOGGING, DB_LOGGING_CONFIG
+        get_api_credentials, ENABLE_DATABASE, ENABLE_MICROSTRUCTURE,
+        DATABASE_LOGGING, DB_LOGGING_CONFIG, TARGET_SYMBOLS,
     )
 except ImportError:
     logger.warning("Config not available, using defaults")
@@ -38,7 +38,8 @@ except ImportError:
     ENABLE_MICROSTRUCTURE = False
     DATABASE_LOGGING = False
     DB_LOGGING_CONFIG = {}
-    
+    TARGET_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN"]
+
     def get_api_credentials():
         return {}
 
@@ -46,15 +47,23 @@ except ImportError:
 try:
     from database_manager import get_database_manager, MarketDataRecord
     DATABASE_AVAILABLE = True
-    logger.info("✅ Database manager available")
+    logger.info("Database manager available")
 except ImportError:
     DATABASE_AVAILABLE = False
     logger.warning("Database manager not available, running without persistence")
 
+# Alpaca client (v2). Falls back to legacy Binance client if alpaca-py missing.
+try:
+    from enhanced_alpaca_client import EnhancedAlpacaClient
+    ALPACA_CLIENT_AVAILABLE = True
+except ImportError:
+    ALPACA_CLIENT_AVAILABLE = False
+    logger.warning("EnhancedAlpacaClient unavailable; data_manager will use legacy client")
+
 # Constants
-BASE_URL = "https://api.binance.com"
-PRICE_HISTORY_LENGTH = 200
-VOLUME_HISTORY_LENGTH = 200
+BASE_URL = "https://data.alpaca.markets"
+PRICE_HISTORY_LENGTH = 252  # ~1y of daily bars
+VOLUME_HISTORY_LENGTH = 252
 DATA_COLLECTION_INTERVAL = 60
 CACHE_TTL = 30
 MICROSTRUCTURE_UPDATE_INTERVAL = 10
@@ -327,22 +336,37 @@ class AdvancedMicrostructureAnalyzer:
             
             # Order book depth analysis
             depth_metrics = self._analyze_order_book_depth(bids, asks, current_price)
-            
+            l1_only = depth_metrics.get("depth_levels_observed", 99) < 2
+
             # Bid-ask ratio (market imbalance)
             bid_ask_ratio = self._calculate_bid_ask_ratio(bids, asks, current_price)
-            
+
+            # ATR & ADV context for L1-only impact estimation.
+            atr = self._estimate_atr(historical_data)
+            avg_daily_volume = self._estimate_avg_daily_volume(historical_data)
+
             # Price impact estimation
-            price_impact = self._estimate_enhanced_price_impact(bids, asks, current_price)
-            
+            price_impact = self._estimate_enhanced_price_impact(
+                bids, asks, current_price, atr=atr, avg_daily_volume=avg_daily_volume
+            )
+
             # Market efficiency score
             market_efficiency = self._calculate_market_efficiency(symbol, historical_data)
-            
+
             # Volatility clustering
             volatility_clustering = self._calculate_volatility_clustering(symbol, historical_data)
-            
-            # Composite liquidity score
+
+            # Composite liquidity score (use volume-based path when L1-only).
+            volume_score = None
+            if l1_only and avg_daily_volume:
+                # Map to 0-1: ~500K shares -> 0.5, ~5M -> 1.0.
+                volume_score = min(avg_daily_volume / 5_000_000, 1.0)
             liquidity_score = self._calculate_enhanced_liquidity_score(
-                spread_relative, depth_metrics['total_depth'], price_impact, market_efficiency
+                spread_relative,
+                depth_metrics['total_depth'],
+                price_impact,
+                market_efficiency,
+                volume_score=volume_score,
             )
             
             # Update historical data for future analysis
@@ -371,39 +395,46 @@ class AdvancedMicrostructureAnalyzer:
             logger.error(f"Microstructure analysis failed for {symbol}: {e}")
             return self._get_fallback_microstructure(symbol)
 
-    def _analyze_order_book_depth(self, bids: List[Tuple], asks: List[Tuple], 
+    def _analyze_order_book_depth(self, bids: List[Tuple], asks: List[Tuple],
                                  current_price: float) -> Dict[str, float]:
-        """Analyze order book depth with multiple metrics"""
+        """Analyze order book depth with multiple metrics.
+
+        Alpaca's free IEX feed provides only Level 1 (best bid/ask). When fewer
+        than two levels are present we return a moderate-default profile so the
+        rest of the microstructure pipeline behaves correctly without faking
+        depth data we don't have.
+        """
         try:
-            # Define depth ranges
+            # L1-only book → moderate defaults (Alpaca free tier).
+            if len(bids) < 2 and len(asks) < 2:
+                return {
+                    "total_depth": 1000.0,
+                    "normalized_depth": 0.5,
+                    "depth_analysis": {"depth_1.0pct": 1000.0},
+                    "depth_levels_observed": max(len(bids), len(asks)),
+                }
+
             ranges = [0.001, 0.005, 0.01, 0.02, 0.05]  # 0.1%, 0.5%, 1%, 2%, 5%
             depth_analysis = {}
-            
+
             for range_pct in ranges:
                 range_value = current_price * range_pct
-                
-                # Calculate bid depth within range
-                bid_depth = sum(qty for price, qty in bids 
+                bid_depth = sum(qty for price, qty in bids
                               if price >= current_price - range_value)
-                
-                # Calculate ask depth within range
-                ask_depth = sum(qty for price, qty in asks 
+                ask_depth = sum(qty for price, qty in asks
                               if price <= current_price + range_value)
-                
                 depth_analysis[f'depth_{range_pct*100:.1f}pct'] = bid_depth + ask_depth
-            
-            # Total depth (1% range is most important)
+
             total_depth = depth_analysis.get('depth_1.0pct', 0)
-            
-            # Normalized depth score (0-1 scale)
-            normalized_depth = min(total_depth / 10000, 1.0)  # Normalize to reasonable range
-            
+            normalized_depth = min(total_depth / 10000, 1.0)
+
             return {
                 'total_depth': total_depth,
                 'normalized_depth': normalized_depth,
-                'depth_analysis': depth_analysis
+                'depth_analysis': depth_analysis,
+                'depth_levels_observed': max(len(bids), len(asks)),
             }
-            
+
         except Exception as e:
             logger.error(f"Order book depth analysis failed: {e}")
             return {'total_depth': 100, 'normalized_depth': 0.5, 'depth_analysis': {}}
@@ -432,42 +463,59 @@ class AdvancedMicrostructureAnalyzer:
             logger.error(f"Bid-ask ratio calculation failed: {e}")
             return 1.0
 
-    def _estimate_enhanced_price_impact(self, bids: List[Tuple], asks: List[Tuple], 
-                                       current_price: float) -> float:
-        """Enhanced price impact estimation for multiple trade sizes"""
+    def _estimate_enhanced_price_impact(self, bids: List[Tuple], asks: List[Tuple],
+                                       current_price: float,
+                                       atr: Optional[float] = None,
+                                       avg_daily_volume: Optional[float] = None) -> float:
+        """Estimate price impact for typical trade sizes.
+
+        Walks the book when L2 data exists. With Alpaca's L1-only feed we fall
+        back to an ATR/volume-based estimate (Almgren-Chriss style):
+            impact ≈ k * (trade_size / ADV) * (ATR / price)
+        This gives a reasonable, monotonic estimate without inventing depth.
+        """
         try:
-            trade_sizes_usd = [100, 500, 1000, 5000]  # Different trade sizes
+            l2_available = len(bids) >= 2 and len(asks) >= 2
+
+            if not l2_available:
+                if atr is None or avg_daily_volume is None or avg_daily_volume <= 0:
+                    return 0.005  # neutral 0.5% fallback
+                # Trade-size weighting consistent with the L2 path below.
+                trade_sizes_usd = [100, 500, 1000, 5000]
+                weights = [0.4, 0.3, 0.2, 0.1]
+                normalized_atr = atr / current_price if current_price > 0 else 0.005
+                weighted_impact = 0.0
+                for size, w in zip(trade_sizes_usd, weights):
+                    qty = size / max(current_price, 1e-9)
+                    participation = qty / avg_daily_volume
+                    # Empirical k ~= 0.1 for liquid US equities, ATR-scaled.
+                    impact = 0.1 * participation * normalized_atr
+                    weighted_impact += impact * w
+                return min(weighted_impact, 0.1)
+
+            trade_sizes_usd = [100, 500, 1000, 5000]
             price_impacts = []
-            
             for trade_size in trade_sizes_usd:
                 quantity_needed = trade_size / current_price
-                
-                # Simulate market buy (walk through asks)
                 remaining_qty = quantity_needed
                 total_cost = 0
-                
                 for price, qty in asks:
                     if remaining_qty <= 0:
                         break
-                    
                     take_qty = min(remaining_qty, qty)
                     total_cost += take_qty * price
                     remaining_qty -= take_qty
-                
                 if quantity_needed > remaining_qty:
                     executed_qty = quantity_needed - remaining_qty
                     avg_price = total_cost / executed_qty if executed_qty > 0 else current_price
-                    impact = abs(avg_price - current_price) / current_price
-                    price_impacts.append(impact)
-            
-            # Return weighted average impact (favor smaller trade sizes)
+                    price_impacts.append(abs(avg_price - current_price) / current_price)
+
             if price_impacts:
-                weights = [0.4, 0.3, 0.2, 0.1]  # Weight smaller trades more
-                weighted_impact = sum(impact * weight for impact, weight in zip(price_impacts, weights))
-                return min(weighted_impact, 0.1)  # Cap at 10%
-            else:
-                return 0.005  # Default 0.5%
-                
+                weights = [0.4, 0.3, 0.2, 0.1]
+                weighted_impact = sum(i * w for i, w in zip(price_impacts, weights))
+                return min(weighted_impact, 0.1)
+            return 0.005
+
         except Exception as e:
             logger.error(f"Price impact estimation failed: {e}")
             return 0.005
@@ -577,26 +625,75 @@ class AdvancedMicrostructureAnalyzer:
             logger.error(f"Volatility clustering calculation failed: {e}")
             return 0.5
 
-    def _calculate_enhanced_liquidity_score(self, spread: float, depth: float, 
-                                          price_impact: float, efficiency: float) -> float:
-        """Calculate enhanced composite liquidity score"""
+    @staticmethod
+    def _estimate_atr(historical_data: List[Dict], period: int = 14) -> Optional[float]:
+        """ATR over recent bars; uses high/low/close fields when present."""
+        if not historical_data or len(historical_data) < 2:
+            return None
         try:
-            # Component scores (normalized to 0-1)
-            spread_score = max(0, 1 - spread * 1000)  # Lower spread = higher score
-            depth_score = min(depth, 1.0)  # Higher depth = higher score
-            impact_score = max(0, 1 - price_impact * 100)  # Lower impact = higher score
-            efficiency_score = efficiency  # Higher efficiency = higher score
-            
-            # Weighted composite score
-            liquidity_score = (
-                spread_score * 0.25 +
-                depth_score * 0.30 +
-                impact_score * 0.25 +
-                efficiency_score * 0.20
-            )
-            
+            trs: List[float] = []
+            prev_close = float(historical_data[0].get("close", 0.0))
+            for bar in historical_data[-(period + 1):]:
+                high = float(bar.get("high", bar.get("close", prev_close)))
+                low = float(bar.get("low", bar.get("close", prev_close)))
+                close = float(bar.get("close", prev_close))
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                trs.append(tr)
+                prev_close = close
+            if not trs:
+                return None
+            return sum(trs) / len(trs)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _estimate_avg_daily_volume(historical_data: List[Dict], window: int = 20) -> Optional[float]:
+        """Average volume over recent bars."""
+        if not historical_data:
+            return None
+        try:
+            vols = [float(b.get("volume", 0.0)) for b in historical_data[-window:]]
+            vols = [v for v in vols if v > 0]
+            if not vols:
+                return None
+            return sum(vols) / len(vols)
+        except Exception:
+            return None
+
+    def _calculate_enhanced_liquidity_score(self, spread: float, depth: float,
+                                          price_impact: float, efficiency: float,
+                                          volume_score: Optional[float] = None) -> float:
+        """Calculate enhanced composite liquidity score.
+
+        On Alpaca's L1-only feed, callers can pass ``volume_score`` (a
+        normalized recent-volume metric) so the missing depth signal is
+        replaced by realized turnover instead of a synthetic depth value.
+        """
+        try:
+            spread_score = max(0, 1 - spread * 1000)
+            impact_score = max(0, 1 - price_impact * 100)
+            efficiency_score = efficiency
+
+            if volume_score is not None:
+                # L1-only path: spread + volume + impact + efficiency.
+                vol_score = max(0.0, min(1.0, volume_score))
+                liquidity_score = (
+                    spread_score * 0.30 +
+                    vol_score * 0.30 +
+                    impact_score * 0.25 +
+                    efficiency_score * 0.15
+                )
+            else:
+                depth_score = min(depth, 1.0)
+                liquidity_score = (
+                    spread_score * 0.25 +
+                    depth_score * 0.30 +
+                    impact_score * 0.25 +
+                    efficiency_score * 0.20
+                )
+
             return max(0.0, min(1.0, liquidity_score))
-            
+
         except Exception as e:
             logger.error(f"Liquidity score calculation failed: {e}")
             return 0.5
@@ -1029,23 +1126,26 @@ class DataManager:
     """Enhanced Data Manager with complete database integration and anti-herding intelligence"""
     
     def __init__(self):
-        logger.info("🚀 Initializing Enhanced DataManager...")
-        
-        # Core components
-        self.api_client = EnhancedBinanceClient()
+        logger.info("Initializing Enhanced DataManager (Alpaca/US-stocks)")
+
+        # Core components — prefer Alpaca, fall back to legacy Binance only if missing.
+        if ALPACA_CLIENT_AVAILABLE:
+            self.api_client = EnhancedAlpacaClient()
+        else:
+            self.api_client = EnhancedBinanceClient()
         self.microstructure_analyzer = AdvancedMicrostructureAnalyzer()
         self.anti_herding_engine = AntiHerdingIntelligence()
-        
+
         # Data storage
         self.price_data = {}
         self.volume_data = {}
         self.microstructure_data = {}
         self.anti_herding_data = {}
         self.ticker_cache = {}
-        
+
         # Configuration
         self.cache_ttl = CACHE_TTL
-        self.symbols_to_collect = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT']
+        self.symbols_to_collect = list(TARGET_SYMBOLS)
         
         # Database integration
         self.db_manager = None

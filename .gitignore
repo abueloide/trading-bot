@@ -7,3 +7,11 @@ logs/
 .DS_Store
 *.backup
 *_corrupted*
+
+# v2 — local data, backtests, caches
+data/
+backtesting/results/
+*.db
+*.sqlite
+*.sqlite3
+*.csv.bak
