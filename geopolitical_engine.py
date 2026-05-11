@@ -722,6 +722,20 @@ class GeopoliticalIntelligence:
             f"  Cash/Stbl: {alloc.get('stables_cash', 0):.0%}",
         ]
 
+        # MX instruments for current regime
+        try:
+            from mx_universe import get_mx_universe
+            mx = get_mx_universe()
+            mx_symbols = mx.filter_by_regime(state.regime.value)
+            if mx_symbols:
+                lines.append("")
+                lines.append(f"MX instruments ({len(mx_symbols)}):")
+                lines.append(f"  {', '.join(mx_symbols[:8])}")
+                if len(mx_symbols) > 8:
+                    lines.append(f"  ...and {len(mx_symbols) - 8} more")
+        except ImportError:
+            pass
+
         if state.trigger_events:
             lines.append("")
             lines.append("Triggers:")
