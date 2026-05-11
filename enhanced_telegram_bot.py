@@ -96,6 +96,7 @@ class EnhancedTelegramBot:
         self.application.add_handler(CommandHandler("news", self.news_command))
         self.application.add_handler(CommandHandler("sectors", self.sectors_command))
         self.application.add_handler(CommandHandler("geo", self.geo_command))
+        self.application.add_handler(CommandHandler("mx", self.mx_command))
 
         # Callback handlers for interactive buttons
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
@@ -103,6 +104,17 @@ class EnhancedTelegramBot:
     # =========================================================================
     # v2 commands — US-stocks specific
     # =========================================================================
+
+    async def mx_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/mx — Mexico market snapshot: IPC, peso, tradeable instruments."""
+        if not self._check_authorization(update):
+            return
+        try:
+            from mx_universe import get_mx_universe
+            summary = get_mx_universe().get_telegram_summary()
+            await update.message.reply_text(summary)
+        except Exception as e:
+            await update.message.reply_text(f"/mx failed: {e}")
 
     async def geo_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/geo — geopolitical regime, allocation, and recent events."""
