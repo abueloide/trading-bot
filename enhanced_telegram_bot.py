@@ -87,9 +87,177 @@ class EnhancedTelegramBot:
         # Control commands
         self.application.add_handler(CommandHandler("emergency", self.emergency_stop_command))
         self.application.add_handler(CommandHandler("restart", self.restart_bot_command))
-        
+
+        # v2 (US-stocks) commands
+        self.application.add_handler(CommandHandler("vix", self.vix_command))
+        self.application.add_handler(CommandHandler("pdt", self.pdt_command))
+        self.application.add_handler(CommandHandler("backtest", self.backtest_command))
+        self.application.add_handler(CommandHandler("smartmoney", self.smartmoney_command))
+        self.application.add_handler(CommandHandler("news", self.news_command))
+        self.application.add_handler(CommandHandler("sectors", self.sectors_command))
+
         # Callback handlers for interactive buttons
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+
+    # =========================================================================
+    # v2 commands — US-stocks specific
+    # =========================================================================
+
+    async def vix_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/vix — current VIX level, VIX rank, SPY trend filter."""
+        if not self._check_authorization(update):
+            return
+        try:
+            from vix_manager import get_vix_manager
+            snap = get_vix_manager().snapshot()
+            vix = snap.get("vix")
+            rank = snap.get("vix_rank", 50.0)
+            uptrend = snap.get("spy_uptrend", True)
+            msg = (
+                f"VIX: {vix:.2f}\n" if vix is not None else "VIX: unavailable\n"
+            ) + (
+                f"VIX rank (1y): {rank:.0f}/100\n"
+                f"SPY > 200d MA: {'yes' if uptrend else 'no'}\n"
+                f"Mean-reversion entries allowed: {'yes' if rank < 50 and uptrend else 'no'}"
+            )
+            await update.message.reply_text(msg)
+        except Exception as e:
+            await update.message.reply_text(f"/vix failed: {e}")
+
+    async def pdt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/pdt — pattern-day-trader compliance status."""
+        if not self._check_authorization(update):
+            return
+        try:
+            from executor import get_executor
+            ex = get_executor()
+            account = ex.get_account() or {}
+            equity = account.get("equity", 0.0)
+            count = ex.pdt.count()
+            limit = ex.pdt.max_per_window
+            can = ex.pdt.can_day_trade(equity)
+            msg = (
+                f"Equity: ${equity:.2f}\n"
+                f"Day trades in last 5 days: {count}/{limit}\n"
+                f"PDT threshold: $25,000\n"
+                f"Can day-trade now: {'yes' if can else 'no'}"
+            )
+            await update.message.reply_text(msg)
+        except Exception as e:
+            await update.message.reply_text(f"/pdt failed: {e}")
+
+    async def backtest_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/backtest <strategy> [symbol] — kick off a backtest run."""
+        if not self._check_authorization(update):
+            return
+        args = context.args or []
+        if not args:
+            await update.message.reply_text(
+                "Usage: /backtest <strategy> [symbol]\n"
+                "Strategies: rsi_mr, confirmed_mr, momentum_rotation, ema_crossover, bollinger_breakout"
+            )
+            return
+        strategy_name = args[0]
+        symbol = args[1].upper() if len(args) > 1 else "SPY"
+        try:
+            from datetime import date
+            from backtesting.engine import run_backtest
+            from backtesting.strategies import STRATEGY_REGISTRY
+            spec = STRATEGY_REGISTRY[strategy_name]
+            await update.message.reply_text(f"Running backtest {strategy_name} on {symbol}...")
+            results = run_backtest(
+                strategy_name=strategy_name,
+                strategy_fn=spec["fn"],
+                strategy_type=spec["type"],
+                max_hold_days=spec.get("max_hold_days"),
+                symbols=[symbol],
+                start=date(2022, 1, 1),
+                end=date.today(),
+                save=True,
+            )
+            r = results.get(symbol)
+            if not r:
+                await update.message.reply_text("No results — check data/credentials")
+                return
+            await update.message.reply_text(
+                f"{symbol} {strategy_name}\n"
+                f"Return: {r.total_return_pct:.2f}%  CAGR: {r.cagr_pct:.2f}%\n"
+                f"Sharpe: {r.sharpe:.2f}  MaxDD: {r.max_drawdown_pct:.2f}%\n"
+                f"WinRate: {r.win_rate_pct:.1f}%  PF: {r.profit_factor:.2f}\n"
+                f"Trades: {r.n_trades}  vs SPY: {r.excess_return_pct:+.2f}%"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"/backtest failed: {e}")
+
+    async def smartmoney_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/smartmoney <symbol> — congress + insider + 13F + dark pool."""
+        if not self._check_authorization(update):
+            return
+        args = context.args or []
+        if not args:
+            await update.message.reply_text("Usage: /smartmoney <symbol>")
+            return
+        symbol = args[0].upper()
+        try:
+            from alternative_data import get_alternative_data_manager
+            score = get_alternative_data_manager().get_smart_money_score(symbol)
+            msg = (
+                f"Smart-money for {symbol}\n"
+                f"Composite: {score.composite:.2f}\n"
+                f"Insider:        {score.insider_score:.2f}\n"
+                f"Congress:       {score.congress_score:.2f}\n"
+                f"Institutional:  {score.institutional_score:.2f}\n"
+                f"Dark pool:      {score.dark_pool_score:.2f}\n"
+                f"(0.5 = neutral; >0.6 bullish; <0.4 bearish)"
+            )
+            await update.message.reply_text(msg)
+        except Exception as e:
+            await update.message.reply_text(f"/smartmoney failed: {e}")
+
+    async def news_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/news <symbol> — aggregate sentiment + macro snapshot."""
+        if not self._check_authorization(update):
+            return
+        args = context.args or []
+        symbol = args[0].upper() if args else "SPY"
+        try:
+            from news_intelligence import get_news_intelligence
+            ni = get_news_intelligence()
+            score = ni.get_news_score(symbol, hours=24)
+            macro = ni.assess_market_risk()
+            await update.message.reply_text(
+                f"News sentiment ({symbol}, 24h): {score:.2f}\n"
+                f"Macro regime: {macro.regime_suggestion}\n"
+                f"VIX rank: {macro.vix_rank:.0f}\n"
+                f"Macro risk: {macro.macro_risk_score:.2f}\n"
+                f"Narrative: {ni.narrative.current()}"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"/news failed: {e}")
+
+    async def sectors_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/sectors — current sector exposure."""
+        if not self._check_authorization(update):
+            return
+        try:
+            from executor import get_executor
+            from stock_universe import default_universe
+            positions = get_executor().get_positions()
+            account = get_executor().get_account() or {}
+            equity = account.get("equity", 0.0) or 1.0
+            by_sector: Dict[str, float] = {}
+            for p in positions:
+                sec = default_universe.sector_for(p["symbol"])
+                by_sector[sec] = by_sector.get(sec, 0) + p.get("market_value", 0.0)
+            if not by_sector:
+                await update.message.reply_text("No open positions")
+                return
+            lines = ["Sector exposure:"]
+            for sec, val in sorted(by_sector.items(), key=lambda x: -x[1]):
+                lines.append(f"  {sec}: ${val:.0f} ({val/equity*100:.1f}%)")
+            await update.message.reply_text("\n".join(lines))
+        except Exception as e:
+            await update.message.reply_text(f"/sectors failed: {e}")
 
     def _check_authorization(self, update: Update) -> bool:
         """Check if user is authorized"""

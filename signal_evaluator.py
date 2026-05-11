@@ -441,14 +441,22 @@ class SignalEvaluator:
             # Generate reasoning
             reasoning = self._generate_reasoning(tech_indicators, regime_info, base_signal)
             
-            # Create base signal
+            # Create base signal. The composite technical evaluator emits
+            # breakout-style signals (RSI/MACD/EMA/Bollinger alignment), so we
+            # tag strategy_type='breakout' — meaning the executor uses bracket
+            # orders (entry + SL + TP). Mean-reversion strategies live in
+            # strategies/mean_reversion.py and emit strategy_type='mean_reversion'
+            # which signals the executor to use TIME-BASED exits with NO SL.
             signal = {
                 'symbol': symbol,
                 'action': base_signal['action'],
+                'strategy': 'composite_technical',
+                'strategy_type': 'breakout',
                 'confidence': confidence,
                 'entry_price': entry_price,
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
+                'max_hold_days': None,
                 'position_size': position_size,
                 'reasoning': reasoning,
                 'timestamp': datetime.now(),
@@ -1349,10 +1357,13 @@ class SignalEvaluator:
         return {
             'symbol': symbol,
             'action': 'HOLD',
+            'strategy': 'composite_technical',
+            'strategy_type': 'breakout',
             'confidence': 0.5,
             'entry_price': 0,
             'stop_loss': 0,
             'take_profit': 0,
+            'max_hold_days': None,
             'position_size': 0,
             'reasoning': reason,
             'timestamp': datetime.now(),
@@ -1362,6 +1373,52 @@ class SignalEvaluator:
             'crowding_analysis': None,
             'analysis_time_ms': 0
         }
+
+    def evaluate_strategies(
+        self,
+        symbol: str,
+        market_data: Dict,
+        *,
+        vix_rank: Optional[float] = None,
+        spy_uptrend: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Run all enabled strategies for a symbol and return matching signals.
+
+        Order:
+            1. Mean reversion A (RSI(2) + VIX rank + SPY uptrend)
+            2. Mean reversion B (RSI(2) + bullish candle confirmation)
+            3. Composite technical (breakout-style fallback)
+
+        Mean-reversion signals carry max_hold_days and stop_loss=None so the
+        executor enforces time-based exits — research-backed: do NOT add
+        price stops to mean reversion.
+        """
+        from strategies.mean_reversion import evaluate_confirmed_mr, evaluate_rsi_mr
+
+        out: List[Dict[str, Any]] = []
+
+        try:
+            sig_a = evaluate_rsi_mr(symbol, market_data, vix_rank=vix_rank, spy_uptrend=spy_uptrend)
+            if sig_a:
+                out.append(sig_a)
+        except Exception as e:
+            logger.warning(f"rsi_mr evaluation failed for {symbol}: {e}")
+
+        try:
+            sig_b = evaluate_confirmed_mr(symbol, market_data, spy_uptrend=spy_uptrend)
+            if sig_b:
+                out.append(sig_b)
+        except Exception as e:
+            logger.warning(f"confirmed_mr evaluation failed for {symbol}: {e}")
+
+        try:
+            base = self.evaluate_signal(symbol, market_data)
+            if base and base.get("action") in ("BUY", "SELL"):
+                out.append(base)
+        except Exception as e:
+            logger.warning(f"composite_technical evaluation failed for {symbol}: {e}")
+
+        return out
 
     def get_signal_history(self, symbol: str, limit: int = 10) -> List[Dict]:
         """Get recent signal history for a symbol"""

@@ -62,14 +62,10 @@ class TradingSystemManager:
                 logger.warning(f"Telegram bot initialization failed: {e}")
                 logger.warning("📱 Continuing without Telegram monitoring...")
             
-            # 3. Initialize Historical Data Downloader
-            logger.info("📥 Initializing historical data downloader...")
-            try:
-                from historical_data_downloader import HistoricalDataDownloader
-                self.historical_downloader = HistoricalDataDownloader()
-                logger.info("✅ Historical data downloader initialized")
-            except Exception as e:
-                logger.warning(f"Historical downloader initialization failed: {e}")
+            # 3. Historical data: handled by Alpaca historical bars in v2; no
+            # separate downloader needed. The backtesting engine fetches its
+            # own data from Alpaca / yfinance fallback on demand.
+            self.historical_downloader = None
             
             logger.info("🎉 All components initialized successfully!")
             return True
@@ -79,52 +75,14 @@ class TradingSystemManager:
             return False
     
     async def check_historical_data(self):
-        """Check and download historical data if needed"""
+        """No-op in v2: historical bars are fetched lazily from Alpaca."""
         try:
-            if not self.historical_downloader:
-                logger.warning("📥 Historical downloader not available")
-                return
-            
-            logger.info("📊 Checking historical data availability...")
-            
-            # Import crypto universe
-            from crypto_universe import default_universe, TRADING_PRESETS
-            
-            # Get symbols based on selected preset
-            preset = "BALANCED"  # Can be changed to CONSERVATIVE, AGGRESSIVE, or FULL_UNIVERSE
+            from stock_universe import TRADING_PRESETS
+            preset = "BALANCED"
             symbols = TRADING_PRESETS[preset]["symbols"]
-            
-            logger.info(f"📊 Using {preset} preset with {len(symbols)} symbols")
-            missing_data = []
-            
-            for symbol in symbols:
-                # Here you would check if data exists in database
-                # For now, assume we need to download
-                missing_data.append(symbol)
-            
-            if missing_data:
-                logger.info(f"📥 Downloading historical data for {len(missing_data)} symbols...")
-                
-                for symbol in missing_data:
-                    logger.info(f"📥 Downloading {symbol} (12 months)...")
-                    success, session_id = await self.historical_downloader.download_symbol_history(
-                        symbol, months_back=12
-                    )
-                    
-                    if success:
-                        logger.info(f"✅ {symbol} download completed")
-                    else:
-                        logger.warning(f"⚠️ {symbol} download failed")
-                    
-                    # Brief pause between downloads
-                    await asyncio.sleep(2)
-                
-                logger.info("📊 Historical data setup completed")
-            else:
-                logger.info("✅ Historical data already available")
-                
+            logger.info(f"Universe: {preset} preset, {len(symbols)} symbols")
         except Exception as e:
-            logger.error(f"Historical data check failed: {e}")
+            logger.error(f"Universe load failed: {e}")
     
     def start_trading_bot(self):
         """Start trading bot in continuous mode"""
