@@ -97,6 +97,7 @@ class EnhancedTelegramBot:
         self.application.add_handler(CommandHandler("sectors", self.sectors_command))
         self.application.add_handler(CommandHandler("geo", self.geo_command))
         self.application.add_handler(CommandHandler("mx", self.mx_command))
+        self.application.add_handler(CommandHandler("crypto", self.crypto_command))
 
         # Callback handlers for interactive buttons
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
@@ -104,6 +105,25 @@ class EnhancedTelegramBot:
     # =========================================================================
     # v2 commands — US-stocks specific
     # =========================================================================
+
+    async def crypto_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/crypto — crypto universe and prices."""
+        if not self._check_authorization(update):
+            return
+        try:
+            from crypto_universe import get_crypto_universe
+            from crypto_client import get_crypto_client
+            universe = get_crypto_universe()
+            client = get_crypto_client()
+            lines = [universe.get_telegram_summary()]
+            # Add BTC/ETH prices if client is available
+            for sym in ["BTCUSDT", "ETHUSDT"]:
+                ticker = client.get_enhanced_ticker(sym)
+                if ticker:
+                    lines.append(f"\n{sym}: ${ticker['price']:,.2f} ({ticker['price_change_24h_pct']:+.1f}%)")
+            await update.message.reply_text("\n".join(lines))
+        except Exception as e:
+            await update.message.reply_text(f"/crypto failed: {e}")
 
     async def mx_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/mx — Mexico market snapshot: IPC, peso, tradeable instruments."""
