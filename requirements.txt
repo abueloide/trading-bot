@@ -17,6 +17,9 @@ apscheduler>=3.10.0
 # Install only if you have a Quiver subscription.
 # quiverquant>=1.0
 
+# Phase A — crypto (optional, install if ENABLE_CRYPTO=true)
+python-binance>=1.0.19
+
 # Phase 5 — news intelligence (optional)
 # FinBERT requires ~2GB RAM; on smaller VPS use Alpha Vantage instead.
 # transformers>=4.40.0

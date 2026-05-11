@@ -394,6 +394,26 @@ NEWS_CONFIG: Dict[str, Any] = {
 
 
 # =============================================================================
+# BINANCE (CRYPTO) CONFIGURATION
+# =============================================================================
+
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
+BINANCE_TESTNET = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
+ENABLE_CRYPTO = os.getenv("ENABLE_CRYPTO", "false").lower() == "true"
+
+CRYPTO_CONFIG: Dict[str, Any] = {
+    "enabled": ENABLE_CRYPTO,
+    "api_key": BINANCE_API_KEY,
+    "secret_key": BINANCE_SECRET_KEY,
+    "testnet": BINANCE_TESTNET,
+    "max_position_pct": 0.20,           # max 20% of crypto allocation per coin
+    "default_quote_asset": "USDT",
+    "scan_interval": 300,               # 5 min (crypto is 24/7)
+}
+
+
+# =============================================================================
 # GEOPOLITICAL ENGINE — Phase B
 # =============================================================================
 
@@ -492,6 +512,7 @@ FEATURE_FLAGS: Dict[str, bool] = {
     "enable_alternative_data": ENABLE_ALTERNATIVE_DATA,
     "enable_news_intelligence": ENABLE_NEWS_INTELLIGENCE,
     "enable_geopolitical": ENABLE_GEOPOLITICAL,
+    "enable_crypto": ENABLE_CRYPTO,
     "enable_debug_mode": os.getenv("DEBUG_MODE", "false").lower() == "true",
     "enable_verbose_logging": os.getenv("VERBOSE_LOGGING", "false").lower() == "true",
 }
