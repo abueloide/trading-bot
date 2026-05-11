@@ -95,6 +95,7 @@ class EnhancedTelegramBot:
         self.application.add_handler(CommandHandler("smartmoney", self.smartmoney_command))
         self.application.add_handler(CommandHandler("news", self.news_command))
         self.application.add_handler(CommandHandler("sectors", self.sectors_command))
+        self.application.add_handler(CommandHandler("geo", self.geo_command))
 
         # Callback handlers for interactive buttons
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
@@ -102,6 +103,19 @@ class EnhancedTelegramBot:
     # =========================================================================
     # v2 commands — US-stocks specific
     # =========================================================================
+
+    async def geo_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/geo — geopolitical regime, allocation, and recent events."""
+        if not self._check_authorization(update):
+            return
+        try:
+            from geopolitical_engine import get_geopolitical_intelligence
+            geo = get_geopolitical_intelligence()
+            geo.update()
+            summary = geo.get_telegram_summary()
+            await update.message.reply_text(summary)
+        except Exception as e:
+            await update.message.reply_text(f"/geo failed: {e}")
 
     async def vix_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/vix — current VIX level, VIX rank, SPY trend filter."""

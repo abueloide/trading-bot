@@ -394,6 +394,25 @@ NEWS_CONFIG: Dict[str, Any] = {
 
 
 # =============================================================================
+# GEOPOLITICAL ENGINE — Phase B
+# =============================================================================
+
+ENABLE_GEOPOLITICAL = os.getenv("ENABLE_GEOPOLITICAL", "false").lower() == "true"
+
+GEOPOLITICAL_CONFIG: Dict[str, Any] = {
+    "enabled": ENABLE_GEOPOLITICAL,
+    "claude_max_calls_per_hour": 20,
+    "event_lookback_hours": 48,
+    "regime_hold_hours": 24,
+    "rebalance_cooldown_hours": 24,
+    "min_events_for_regime_change": 2,
+    "tail_event_override": True,
+    "fmp_api_key": os.getenv("FMP_API_KEY", "demo"),
+    "banxico_token": os.getenv("BANXICO_TOKEN", ""),
+}
+
+
+# =============================================================================
 # BACKTESTING
 # =============================================================================
 
@@ -472,6 +491,7 @@ FEATURE_FLAGS: Dict[str, bool] = {
     "enable_microstructure_analysis": ENABLE_MICROSTRUCTURE,
     "enable_alternative_data": ENABLE_ALTERNATIVE_DATA,
     "enable_news_intelligence": ENABLE_NEWS_INTELLIGENCE,
+    "enable_geopolitical": ENABLE_GEOPOLITICAL,
     "enable_debug_mode": os.getenv("DEBUG_MODE", "false").lower() == "true",
     "enable_verbose_logging": os.getenv("VERBOSE_LOGGING", "false").lower() == "true",
 }
