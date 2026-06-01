@@ -46,7 +46,5 @@ class LiveExecutorAdapter:
         price: float,
         strategy: str,
     ) -> bool:
-        # Use the dedicated close_position path — it handles the full
-        # Alpaca close + journals the exit + clears the time-exit tracker.
-        res = self._ex.close_position(symbol, reason=f"signal_exit:{strategy}")
+        res = self._ex.place_market_sell(symbol=symbol, qty=qty, strategy=strategy)
         return res is not None

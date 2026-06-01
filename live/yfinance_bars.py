@@ -27,5 +27,9 @@ class YFinanceBars:
             "Low": "low",
             "Close": "close",
             "Volume": "volume",
-        })[["open", "high", "low", "close", "volume"]].tail(lookback)
-        return df
+        })
+        required = {"open", "high", "low", "close", "volume"}
+        if not required.issubset(df.columns):
+            logger.warning("yfinance returned unexpected columns for %s: %s", symbol, list(df.columns))
+            return None
+        return df[["open", "high", "low", "close", "volume"]].tail(lookback)

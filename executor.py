@@ -247,6 +247,10 @@ class Executor:
         strategy: str = "",
     ) -> Optional[Dict[str, Any]]:
         """Mean reversion entry — market order, NO stop-loss. Time exit tracked locally."""
+        if side.upper() != "BUY":
+            raise ValueError(
+                "place_market_order_with_time_exit is BUY-only; use place_market_sell for exits"
+            )
         if not self._client:
             logger.warning(f"No Alpaca client — cannot place market order for {symbol}")
             return None
@@ -274,6 +278,42 @@ class Executor:
             return {"id": str(order.id), "symbol": symbol, "qty": qty, "type": "market_time_exit"}
         except Exception as e:
             logger.error(f"Market order failed for {symbol}: {e}")
+            return None
+
+    def place_market_sell(self, symbol: str, qty: float, strategy: str = "") -> Optional[Dict[str, Any]]:
+        """Plain market SELL of a SPECIFIC qty (no stop-loss, no time-exit).
+
+        Closes exactly ONE strategy's shares in the shared paper account so other
+        strategies holding the same symbol are unaffected. This IS the exit, so it
+        does NOT register a time-exit. Use this for strategy exit signals; use
+        close_position only when liquidating the whole net account position.
+        """
+        if not self._client:
+            logger.warning(f"No Alpaca client — cannot place market sell for {symbol}")
+            return None
+        if not is_market_open():
+            logger.warning(f"Market closed — rejecting market sell for {symbol}")
+            return None
+        try:
+            req = MarketOrderRequest(
+                symbol=symbol,
+                qty=round(qty, 4),
+                side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY,
+            )
+            order = self._client.submit_order(req)
+            self._journal({
+                "timestamp": datetime.utcnow(),
+                "symbol": symbol,
+                "action": "SELL",
+                "strategy": strategy,
+                "strategy_type": "",
+                "reasoning": "strategy exit signal — market sell of strategy qty",
+                "order_id": str(order.id),
+            })
+            return {"id": str(order.id), "symbol": symbol, "qty": qty, "type": "market_sell"}
+        except Exception as e:
+            logger.error(f"Market sell failed for {symbol}: {e}")
             return None
 
     def check_time_exits(self) -> List[Dict[str, Any]]:

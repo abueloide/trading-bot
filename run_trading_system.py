@@ -32,15 +32,25 @@ STRATEGIES = [
 def main() -> int:
     load_dotenv()
     base_url = os.getenv("ALPACA_BASE_URL", "")
-    if "paper" not in base_url:
+    if not base_url.startswith("https://paper-api.alpaca.markets"):
         raise SystemExit(
             "Refusing to run: ALPACA_BASE_URL is not a paper endpoint "
             f"(got {base_url!r}). This bot only runs on paper."
         )
     executor = Executor()
-    orch = Orchestrator(STRATEGIES, YFinanceBars(), LiveExecutorAdapter(executor))
+    bars = YFinanceBars()
+    orch = Orchestrator(STRATEGIES, bars, LiveExecutorAdapter(executor))
     orch.run_cycle()
-    rows = build_report([orch.portfolio(s.strategy) for s in STRATEGIES], marks={})
+    # NOTE: executor.check_time_exits() is intentionally NOT called here in v1.
+    # Time-exit reconciliation requires per-strategy ledger lookup to know which
+    # strategy's shares are being closed (same CORE invariant as SELL). This is a
+    # follow-up item; close_position() has the same whole-position bug as the old sell.
+    marks = {}
+    for sym in UNIVERSE:
+        df = bars.get_bars(sym, 2)
+        if df is not None and len(df):
+            marks[sym] = float(df["close"].iloc[-1])
+    rows = build_report([orch.portfolio(s.strategy) for s in STRATEGIES], marks=marks)
     print(format_table(rows))
     return 0
 
