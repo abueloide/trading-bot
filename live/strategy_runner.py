@@ -41,11 +41,14 @@ class StrategyRunner:
         self.max_hold_days = spec.get("max_hold_days")
 
     def run(self, symbol: str, bars: pd.DataFrame) -> Signal:
-        price = float(bars["close"].iloc[-1]) if len(bars) else 0.0
+        # Price read and strategy call share one guard: empty bars, a missing
+        # "close" column, or a throwing strategy fn all degrade to HOLD rather
+        # than crash the live loop.
         try:
+            price = float(bars["close"].iloc[-1])
             signals = self._fn(bars)
         except Exception:
-            return Signal("HOLD", price, symbol, self.name)
+            return Signal("HOLD", 0.0, symbol, self.name)
         if signals is None or len(signals) == 0:
             return Signal("HOLD", price, symbol, self.name)
         last = signals.iloc[-1]
