@@ -32,4 +32,11 @@ def oversold_then_bars() -> pd.DataFrame:
     # Long uptrend, then a sharp 5-day drop to force RSI(2) oversold on the last bar.
     base = [100.0 + i * 0.5 for i in range(255)]
     drop = [base[-1] * f for f in (0.96, 0.92, 0.88, 0.85, 0.82)]
-    return _bars(base + drop)
+    df = _bars(base + drop)
+    # Make the final (oversold) bar a bullish reversal candle: open/low below the
+    # close so confirmed_mr's `close > open` entry condition holds. The close
+    # series is untouched, so RSI(2) stays deeply oversold (<15) on the last bar.
+    last_close = float(df["close"].iloc[-1])
+    df.iloc[-1, df.columns.get_loc("open")] = last_close * 0.99
+    df.iloc[-1, df.columns.get_loc("low")] = last_close * 0.985
+    return df
