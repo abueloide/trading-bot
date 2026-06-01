@@ -7,8 +7,11 @@ import pandas as pd
 
 
 class BarProvider(Protocol):
-    def get_bars(self, symbol: str, lookback: int) -> pd.DataFrame:
-        """Trailing `lookback` daily OHLCV bars, lowercase columns, date index."""
+    def get_bars(self, symbol: str, lookback: int) -> Optional[pd.DataFrame]:
+        """Trailing `lookback` daily OHLCV bars, lowercase columns, date index.
+
+        May return None / empty when data is unavailable; callers must guard.
+        """
         ...
 
 

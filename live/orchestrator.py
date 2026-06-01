@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from live.ports import BarProvider, ExecutorPort
-from live.strategy_runner import StrategyRunner
+from live.strategy_runner import Signal, StrategyRunner
 from live.virtual_portfolio import VirtualPortfolio
 from risk_manager import RiskManager
 
@@ -67,11 +67,15 @@ class Orchestrator:
                 elif sig.action == "SELL":
                     self._handle_sell(vp, sig)
 
-    def _handle_buy(self, runner, vp, sig) -> None:
+    def _handle_buy(self, runner: StrategyRunner, vp: VirtualPortfolio, sig: Signal) -> None:
         if vp.qty(sig.symbol) > 0:
             return  # already holding for this strategy; no pyramiding in v1
         state = vp.to_portfolio_state(marks={sig.symbol: sig.price})
-        proposed = state.equity  # let risk manager trim via caps/reserve
+        # Size against deployable CASH, not equity: with open positions held by
+        # this strategy, equity > cash, and the risk manager could otherwise
+        # approve more than the slice can fund, making record_buy raise after
+        # the broker already filled (ledger/reality drift).
+        proposed = state.cash
         decision = self._risk.evaluate_entry(
             symbol=sig.symbol,
             proposed_size_usd=proposed,
@@ -89,9 +93,15 @@ class Orchestrator:
             symbol=sig.symbol, qty=qty, price=sig.price, strategy=runner.name,
             strategy_type=runner.strategy_type, max_hold_days=runner.max_hold_days,
         ):
-            vp.record_buy(sig.symbol, qty, sig.price)
+            try:
+                vp.record_buy(sig.symbol, qty, sig.price)
+            except ValueError as e:
+                logger.critical(
+                    "LEDGER DRIFT %s/%s: broker filled but ledger rejected the buy: %s",
+                    runner.name, sig.symbol, e,
+                )
 
-    def _handle_sell(self, vp, sig) -> None:
+    def _handle_sell(self, vp: VirtualPortfolio, sig: Signal) -> None:
         held = vp.qty(sig.symbol)
         if held <= 0:
             return
