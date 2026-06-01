@@ -47,3 +47,39 @@ def test_to_portfolio_state_reflects_slice():
     assert len(state.positions) == 1
     assert state.positions[0]["symbol"] == "AAPL"
     assert state.positions[0]["market_value"] == pytest.approx(220.0)
+
+
+def test_sell_symbol_never_owned_raises():
+    vp = VirtualPortfolio("s", starting_cash=1000.0)
+    with pytest.raises(ValueError):
+        vp.record_sell("TSLA", qty=1.0, price=100.0)
+    assert vp.cash == pytest.approx(1000.0)  # cash untouched
+
+
+def test_sell_zero_or_negative_price_raises():
+    vp = VirtualPortfolio("s", starting_cash=1000.0)
+    vp.record_buy("AAPL", qty=1.0, price=100.0)
+    with pytest.raises(ValueError):
+        vp.record_sell("AAPL", qty=1.0, price=0.0)
+
+
+def test_cross_strategy_isolation():
+    # Two strategies hold the same symbol independently. Selling from one
+    # must not touch the other's position — the core ledger invariant.
+    a = VirtualPortfolio("momentum_rotation", starting_cash=1000.0)
+    b = VirtualPortfolio("rsi_mr", starting_cash=1000.0)
+    a.record_buy("AAPL", qty=3.0, price=100.0)
+    b.record_buy("AAPL", qty=2.0, price=100.0)
+    a.record_sell("AAPL", qty=3.0, price=120.0)
+    assert a.qty("AAPL") == pytest.approx(0.0)
+    assert b.qty("AAPL") == pytest.approx(2.0)  # untouched
+    assert b.avg_entry("AAPL") == pytest.approx(100.0)
+
+
+def test_full_liquidation_then_rebuy_resets_avg_entry():
+    vp = VirtualPortfolio("s", starting_cash=1000.0)
+    vp.record_buy("AAPL", qty=2.0, price=100.0)
+    vp.record_sell("AAPL", qty=2.0, price=110.0)
+    vp.record_buy("AAPL", qty=1.0, price=200.0)
+    assert vp.qty("AAPL") == pytest.approx(1.0)
+    assert vp.avg_entry("AAPL") == pytest.approx(200.0)  # old lot fully cleared

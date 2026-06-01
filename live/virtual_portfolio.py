@@ -7,7 +7,7 @@ bought. Emits a RiskManager.PortfolioState for position sizing.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict
 
 from risk_manager import PortfolioState
@@ -47,12 +47,13 @@ class VirtualPortfolio:
 
     def record_sell(self, symbol: str, qty: float, price: float) -> float:
         lot = self._lots.get(symbol, _Lot())
-        if qty <= 0:
-            raise ValueError("sell qty must be positive")
+        if qty <= 0 or price <= 0:
+            raise ValueError("sell qty and price must be positive")
         if qty > lot.qty + 1e-9:
             raise ValueError(
                 f"{self.strategy} cannot sell {qty} {symbol}; owns {lot.qty}"
             )
+        qty = min(qty, lot.qty)  # absorb float noise; never subtract more than owned
         proceeds = qty * price
         realized = (price - lot.avg_entry) * qty
         self.realized_pnl += realized
