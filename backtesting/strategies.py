@@ -88,12 +88,12 @@ def strategy_rsi_mr_vix(
     uptrend = sym_short > sym_long
 
     if vix_rank_series is not None:
-        vix_ok = vix_rank_series.reindex(df.index).fillna(method="ffill") < vix_threshold
+        vix_ok = vix_rank_series.reindex(df.index).ffill() < vix_threshold
     else:
         vix_ok = pd.Series(True, index=df.index)
 
     if spy_close is not None and len(spy_close) >= sma_long:
-        spy_aligned = spy_close.reindex(df.index).fillna(method="ffill")
+        spy_aligned = spy_close.reindex(df.index).ffill()
         spy_ma = sma(spy_aligned, sma_long)
         spy_ok = spy_aligned > spy_ma
     else:
@@ -124,7 +124,7 @@ def strategy_confirmed_mr(
     bullish_candle = df["close"] > df["open"]
 
     if spy_close is not None and len(spy_close) >= sma_long:
-        spy_aligned = spy_close.reindex(df.index).fillna(method="ffill")
+        spy_aligned = spy_close.reindex(df.index).ffill()
         spy_ma = sma(spy_aligned, sma_long)
         spy_ok = spy_aligned > spy_ma
     else:
