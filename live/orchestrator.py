@@ -35,6 +35,7 @@ class Orchestrator:
         bars: BarProvider,
         executor: ExecutorPort,
         risk_config: Optional[dict] = None,
+        initial_states: Optional[Dict[str, dict]] = None,
     ) -> None:
         self._bars = bars
         self._executor = executor
@@ -44,7 +45,10 @@ class Orchestrator:
         self._symbols: Dict[str, List[str]] = {}
         for c in configs:
             self._runners[c.strategy] = StrategyRunner(c.strategy)
-            self._portfolios[c.strategy] = VirtualPortfolio(c.strategy, c.starting_cash)
+            if initial_states and c.strategy in initial_states:
+                self._portfolios[c.strategy] = VirtualPortfolio.from_dict(initial_states[c.strategy])
+            else:
+                self._portfolios[c.strategy] = VirtualPortfolio(c.strategy, c.starting_cash)
             self._symbols[c.strategy] = list(c.symbols)
 
     def portfolio(self, strategy: str) -> VirtualPortfolio:

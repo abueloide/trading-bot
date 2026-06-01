@@ -83,3 +83,26 @@ def test_full_liquidation_then_rebuy_resets_avg_entry():
     vp.record_buy("AAPL", qty=1.0, price=200.0)
     assert vp.qty("AAPL") == pytest.approx(1.0)
     assert vp.avg_entry("AAPL") == pytest.approx(200.0)  # old lot fully cleared
+
+
+def test_to_dict_from_dict_roundtrip():
+    vp = VirtualPortfolio("confirmed_mr", starting_cash=1000.0)
+    vp.record_buy("AAPL", qty=2.0, price=100.0)
+    vp.record_buy("MSFT", qty=1.0, price=50.0)
+    vp.record_sell("AAPL", qty=1.0, price=130.0)  # realized +30, holds 1 AAPL @100
+    data = vp.to_dict()
+    restored = VirtualPortfolio.from_dict(data)
+    assert restored.strategy == "confirmed_mr"
+    assert restored.starting_cash == pytest.approx(1000.0)
+    assert restored.cash == pytest.approx(vp.cash)
+    assert restored.realized_pnl == pytest.approx(30.0)
+    assert restored.qty("AAPL") == pytest.approx(1.0)
+    assert restored.avg_entry("AAPL") == pytest.approx(100.0)
+    assert restored.qty("MSFT") == pytest.approx(1.0)
+
+
+def test_to_dict_is_json_serializable():
+    import json
+    vp = VirtualPortfolio("rsi_mr", 500.0)
+    vp.record_buy("SPY", 1.0, 400.0)
+    json.dumps(vp.to_dict())  # must not raise

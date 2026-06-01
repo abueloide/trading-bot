@@ -63,6 +63,29 @@ class VirtualPortfolio:
             self._lots.pop(symbol, None)
         return realized
 
+    def to_dict(self) -> dict:
+        return {
+            "strategy": self.strategy,
+            "starting_cash": self.starting_cash,
+            "cash": self.cash,
+            "realized_pnl": self.realized_pnl,
+            "lots": {
+                sym: {"qty": lot.qty, "avg_entry": lot.avg_entry}
+                for sym, lot in self._lots.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "VirtualPortfolio":
+        vp = cls(data["strategy"], data["starting_cash"])
+        vp.cash = float(data["cash"])
+        vp.realized_pnl = float(data["realized_pnl"])
+        vp._lots = {
+            sym: _Lot(qty=float(l["qty"]), avg_entry=float(l["avg_entry"]))
+            for sym, l in data.get("lots", {}).items()
+        }
+        return vp
+
     def to_portfolio_state(self, marks: Dict[str, float]) -> PortfolioState:
         positions = []
         invested = 0.0

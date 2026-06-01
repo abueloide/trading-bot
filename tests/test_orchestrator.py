@@ -118,3 +118,30 @@ def test_multi_strategy_isolation_in_one_cycle(oversold_then_bars, rising_bars):
     assert orch.portfolio("rsi_mr").cash == pytest.approx(1000.0)  # B's slice untouched
     # confirmed_mr's buy did not leak into rsi_mr's ledger
     assert orch.portfolio("rsi_mr").qty("AAPL") == 0
+
+
+def test_hydrated_holding_does_not_rebuy(oversold_then_bars):
+    # A prior run left confirmed_mr already holding AAPL. A fresh BUY signal
+    # must NOT re-buy (no-pyramiding guard works across runs via persistence).
+    execu = RecordingExecutor()
+    cfg = [StrategyConfig(strategy="confirmed_mr", symbols=["AAPL"], starting_cash=1000.0)]
+    initial = {
+        "confirmed_mr": {
+            "strategy": "confirmed_mr", "starting_cash": 1000.0,
+            "cash": 800.0, "realized_pnl": 0.0,
+            "lots": {"AAPL": {"qty": 2.0, "avg_entry": 100.0}},
+        }
+    }
+    orch = Orchestrator(cfg, FakeBars(oversold_then_bars), execu,
+                        risk_config={"max_position_pct": 1.0, "min_cash_reserve_pct": 0.0},
+                        initial_states=initial)
+    assert orch.portfolio("confirmed_mr").qty("AAPL") == 2.0  # loaded
+    orch.run_cycle()
+    assert execu.buys == []  # already holding → no re-buy
+
+
+def test_no_initial_state_starts_fresh(rising_bars):
+    execu = RecordingExecutor()
+    cfg = [StrategyConfig(strategy="confirmed_mr", symbols=["AAPL"], starting_cash=1000.0)]
+    orch = Orchestrator(cfg, FakeBars(rising_bars), execu, initial_states=None)
+    assert orch.portfolio("confirmed_mr").cash == 1000.0
