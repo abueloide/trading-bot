@@ -24,6 +24,29 @@ class KeyedBars:
         return self._by.get(symbol)
 
 
+class KeyedBatchBars:
+    """Per-symbol frames, exposing the batch path the real provider uses."""
+    def __init__(self, by_symbol: dict):
+        self._by = by_symbol
+        self.batch_calls = 0
+
+    def get_bars_batch(self, symbols, lookback):
+        self.batch_calls += 1
+        return {s: self._by[s] for s in symbols if self._by.get(s) is not None}
+
+
+def _ramp(slope: float, n: int = 200, start: float = 100.0) -> pd.DataFrame:
+    idx = pd.date_range("2023-01-01", periods=n, freq="B")
+    close = pd.Series([start + slope * i for i in range(n)], index=idx, dtype="float64")
+    return pd.DataFrame({
+        "open": close.shift(1).fillna(close.iloc[0]),
+        "high": close * 1.01,
+        "low": close * 0.99,
+        "close": close,
+        "volume": pd.Series(1_000_000, index=idx, dtype="float64"),
+    })
+
+
 class RecordingExecutor:
     def __init__(self):
         self.buys = []
@@ -36,6 +59,59 @@ class RecordingExecutor:
     def sell(self, *, symbol, qty, price, strategy):
         self.sells.append((symbol, qty, strategy))
         return True
+
+
+_HORSE_RISK = {"max_position_pct": 1.0, "min_cash_reserve_pct": 0.0,
+               "max_open_positions": 50, "max_sector_exposure_pct": 1.0}
+
+
+def test_momentum_buys_top_n_by_rank_not_alphabetical():
+    # WEAK ranks last by slope but first alphabetically — the old per-symbol loop
+    # would have bought it; cross-sectional ranking must NOT.
+    execu = RecordingExecutor()
+    bars = KeyedBatchBars({
+        "AAA_WEAK": _ramp(0.05),
+        "MMM_MID": _ramp(0.5),
+        "ZZZ_STRONG": _ramp(1.5),
+    })
+    cfg = [StrategyConfig("momentum_rotation", list(bars._by), 30_000.0, max_positions=2)]
+    orch = Orchestrator(cfg, bars, execu, risk_config=_HORSE_RISK)
+    orch.run_cycle()
+    bought = {b[0] for b in execu.buys}
+    assert bought == {"ZZZ_STRONG", "MMM_MID"}
+    assert "AAA_WEAK" not in bought
+    assert bars.batch_calls == 1  # used the batch path
+
+
+def test_momentum_holds_between_rebalances():
+    execu = RecordingExecutor()
+    bars = KeyedBatchBars({"A": _ramp(1.5), "B": _ramp(1.0), "C": _ramp(0.5)})
+    cfg = [StrategyConfig("momentum_rotation", list(bars._by), 30_000.0, max_positions=2)]
+    orch = Orchestrator(cfg, bars, execu, risk_config=_HORSE_RISK)
+    orch.run_cycle(is_rebalance_day=True)   # initial deployment: A, B
+    execu.buys.clear()
+    orch.run_cycle(is_rebalance_day=False)  # non-rebalance day → ride the book
+    assert execu.buys == [] and execu.sells == []
+
+
+def test_momentum_rotates_on_rebalance_day():
+    execu = RecordingExecutor()
+    # Book holds C (now weakest); D is strongest and should rotate in.
+    bars = KeyedBatchBars({"A": _ramp(1.5), "B": _ramp(1.2), "C": _ramp(0.2), "D": _ramp(2.0)})
+    cfg = [StrategyConfig("momentum_rotation", list(bars._by), 30_000.0, max_positions=2)]
+    initial = {"momentum_rotation": {
+        "strategy": "momentum_rotation", "starting_cash": 30_000.0,
+        "cash": 10_000.0, "realized_pnl": 0.0,
+        "lots": {"A": {"qty": 50.0, "avg_entry": 200.0},
+                 "C": {"qty": 50.0, "avg_entry": 100.0}},
+    }}
+    orch = Orchestrator(cfg, bars, execu, risk_config=_HORSE_RISK, initial_states=initial)
+    orch.run_cycle(is_rebalance_day=True)
+    sold = {s[0] for s in execu.sells}
+    bought = {b[0] for b in execu.buys}
+    assert "C" in sold        # weakest dropped
+    assert "D" in bought      # strongest rotated in
+    assert "A" not in sold    # still top-2 → held
 
 
 def test_buy_signal_places_tagged_order_and_updates_ledger(oversold_then_bars):

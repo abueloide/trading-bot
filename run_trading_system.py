@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
-"""Run the paper horse race: 3 backtested strategies, one paper account."""
+"""Run the paper horse race: 3 backtested strategies, one paper account.
+
+Universe = the full static S&P 500 snapshot (no runtime network for membership;
+see sp500_constituents.py). Bars are downloaded ONCE in a batch and reused for
+the cycle, the monthly-rebalance check, and end-of-run marks.
+"""
 from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
+from typing import Dict
+
+import pandas as pd
 
 from dotenv import load_dotenv
 
 from executor import Executor
 from live.ledger_store import load_ledgers, save_ledgers
 from live.live_executor_adapter import LiveExecutorAdapter
-from live.orchestrator import Orchestrator, StrategyConfig
-from live.yfinance_bars import YFinanceBars
+from live.orchestrator import LOOKBACK_BARS, Orchestrator, StrategyConfig
+from live.yfinance_bars import CachedBars, YFinanceBars
 from live.horse_race_report import build_report, format_table
+from stock_universe import sp500_symbols
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,15 +30,50 @@ logging.basicConfig(
 )
 logger = logging.getLogger("horse_race")
 
-UNIVERSE = ["SPY", "AAPL", "MSFT", "QQQ", "NVDA"]
 SLICE = 33_000.0  # virtual cash per strategy (paper)
 STATE_PATH = Path("data/ledgers/state.json")
+REBALANCE_REFERENCE = "SPY"  # market-calendar anchor for the monthly rebalance
 
+# Risk overlay tuned for a diversified equal-weight horse race: many small
+# equal-weight slots (momentum 15, MR 10), near-full deployment, no sector cap
+# (this is a pure strategy comparison; a sector overlay is a separate concern).
+HORSE_RISK_CONFIG = {
+    "max_open_positions": 50,
+    "min_cash_reserve_pct": 0.0,
+    "max_cash_reserve_pct": 0.05,
+    "max_position_pct": 0.15,
+    "max_sector_exposure_pct": 1.0,
+}
+
+# The full S&P 500 universe feeds every strategy; each builds its own basket.
+UNIVERSE = sp500_symbols()
 STRATEGIES = [
-    StrategyConfig("momentum_rotation", UNIVERSE, SLICE),
-    StrategyConfig("confirmed_mr", UNIVERSE, SLICE),
-    StrategyConfig("rsi_mr", UNIVERSE, SLICE),
+    StrategyConfig("momentum_rotation", UNIVERSE, SLICE, max_positions=15),
+    StrategyConfig("confirmed_mr", UNIVERSE, SLICE, max_positions=10),
+    StrategyConfig("rsi_mr", UNIVERSE, SLICE, max_positions=10),
 ]
+
+
+def _is_first_trading_day_of_month(snapshot: Dict[str, pd.DataFrame]) -> bool:
+    """True when the latest bar is the first trading day of its month.
+
+    Uses the SPY calendar (falls back to any available symbol) so the monthly
+    momentum rebalance lands on a real session, not a weekend/holiday guess.
+    """
+    df = snapshot.get(REBALANCE_REFERENCE)
+    if df is None or len(df) == 0:
+        for candidate in snapshot.values():
+            if candidate is not None and len(candidate):
+                df = candidate
+                break
+    if df is None or len(df) == 0:
+        return False
+    idx = df.index
+    last = idx[-1]
+    earlier_same_month = any(
+        d.year == last.year and d.month == last.month and d < last for d in idx
+    )
+    return not earlier_same_month
 
 
 def main() -> int:
@@ -40,24 +84,31 @@ def main() -> int:
             "Refusing to run: ALPACA_BASE_URL is not a paper endpoint "
             f"(got {base_url!r}). This bot only runs on paper."
         )
+
+    logger.info("fetching bars for %d symbols (batch)...", len(UNIVERSE))
+    snapshot = YFinanceBars().get_bars_batch(UNIVERSE, LOOKBACK_BARS)
+    if not snapshot:
+        raise SystemExit("No bars returned for the universe; aborting (no trades).")
+    cached = CachedBars(snapshot)
+    is_rebalance = _is_first_trading_day_of_month(snapshot)
+    logger.info("universe bars: %d/%d usable; rebalance_day=%s",
+                len(snapshot), len(UNIVERSE), is_rebalance)
+
     initial_states = load_ledgers(STATE_PATH)
     executor = Executor()
-    bars = YFinanceBars()
-    orch = Orchestrator(STRATEGIES, bars, LiveExecutorAdapter(executor),
-                        initial_states=initial_states)
-    orch.run_cycle()
+    orch = Orchestrator(STRATEGIES, cached, LiveExecutorAdapter(executor),
+                        risk_config=HORSE_RISK_CONFIG, initial_states=initial_states)
+    orch.run_cycle(is_rebalance_day=is_rebalance)
     # NOTE: executor.check_time_exits() is intentionally NOT called here in v1.
     # Time-exit reconciliation requires per-strategy ledger lookup to know which
     # strategy's shares are being closed (same CORE invariant as SELL). This is a
     # follow-up item; close_position() has the same whole-position bug as the old sell.
+
     portfolios = [orch.portfolio(s.strategy) for s in STRATEGIES]
     save_ledgers(portfolios, STATE_PATH)
     logger.info("ledger state saved to %s", STATE_PATH)
-    marks = {}
-    for sym in UNIVERSE:
-        df = bars.get_bars(sym, 2)
-        if df is not None and len(df):
-            marks[sym] = float(df["close"].iloc[-1])
+
+    marks = {sym: float(df["close"].iloc[-1]) for sym, df in snapshot.items() if len(df)}
     rows = build_report(portfolios, marks=marks)
     print(format_table(rows))
     return 0

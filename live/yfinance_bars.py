@@ -2,12 +2,29 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
+
+_RENAME = {"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}
+_REQUIRED = {"open", "high", "low", "close", "volume"}
+_BATCH_CHUNK = 100  # symbols per yf.download call — one network round-trip per chunk.
+
+
+def _normalize(raw: Optional[pd.DataFrame], lookback: int) -> Optional[pd.DataFrame]:
+    """Rename to lowercase OHLCV, validate, drop empty rows, tail to lookback."""
+    if raw is None or raw.empty:
+        return None
+    df = raw.rename(columns=_RENAME)
+    if not _REQUIRED.issubset(df.columns):
+        return None
+    df = df[["open", "high", "low", "close", "volume"]].dropna(how="all")
+    if df.empty:
+        return None
+    return df.tail(lookback)
 
 
 class YFinanceBars:
@@ -19,17 +36,67 @@ class YFinanceBars:
         except Exception as e:
             logger.warning("yfinance fetch failed for %s: %s", symbol, e)
             return None
-        if raw is None or raw.empty:
-            return None
-        df = raw.rename(columns={
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-        })
-        required = {"open", "high", "low", "close", "volume"}
-        if not required.issubset(df.columns):
-            logger.warning("yfinance returned unexpected columns for %s: %s", symbol, list(df.columns))
-            return None
-        return df[["open", "high", "low", "close", "volume"]].tail(lookback)
+        out = _normalize(raw, lookback)
+        if out is None:
+            logger.warning("yfinance returned no usable bars for %s", symbol)
+        return out
+
+    def get_bars_batch(self, symbols: List[str], lookback: int) -> Dict[str, pd.DataFrame]:
+        """One snapshot of the whole universe: yf.download in chunks of ~100.
+
+        Per-symbol fetching 500 names rate-limits Yahoo fast; batching collapses
+        each chunk into a single round-trip. Symbols with no usable data are
+        simply omitted from the returned dict (callers already guard on missing).
+        """
+        period_days = int(lookback * 1.6) + 10
+        out: Dict[str, pd.DataFrame] = {}
+        unique = list(dict.fromkeys(symbols))  # dedupe, preserve order
+        for i in range(0, len(unique), _BATCH_CHUNK):
+            chunk = unique[i:i + _BATCH_CHUNK]
+            try:
+                raw = yf.download(
+                    tickers=chunk,
+                    period=f"{period_days}d",
+                    interval="1d",
+                    group_by="ticker",
+                    auto_adjust=True,
+                    threads=True,
+                    progress=False,
+                )
+            except Exception as e:
+                logger.warning("batch download failed for chunk %d (%d syms): %s", i, len(chunk), e)
+                continue
+            if raw is None or raw.empty:
+                continue
+            for sym in chunk:
+                try:
+                    sub = raw[sym] if len(chunk) > 1 else raw
+                except (KeyError, IndexError):
+                    continue
+                norm = _normalize(sub, lookback)
+                if norm is not None:
+                    out[sym] = norm
+        logger.info("batch bars: %d/%d symbols returned usable data", len(out), len(unique))
+        return out
+
+
+class CachedBars:
+    """Serves a pre-fetched {symbol: DataFrame} snapshot — zero extra network.
+
+    Lets the entrypoint download the whole universe once and reuse it for the
+    orchestrator cycle, the rebalance-day check, and end-of-run marks.
+    """
+
+    def __init__(self, snapshot: Dict[str, pd.DataFrame]) -> None:
+        self._snapshot = dict(snapshot)
+
+    def get_bars(self, symbol: str, lookback: int) -> Optional[pd.DataFrame]:
+        df = self._snapshot.get(symbol)
+        return None if df is None else df.tail(lookback)
+
+    def get_bars_batch(self, symbols: List[str], lookback: int) -> Dict[str, pd.DataFrame]:
+        return {s: self._snapshot[s].tail(lookback)
+                for s in symbols if self._snapshot.get(s) is not None}
+
+    def snapshot(self) -> Dict[str, pd.DataFrame]:
+        return self._snapshot

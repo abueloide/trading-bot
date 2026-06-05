@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '## Estado vivo de este proyecto — CLAWBOT-BACKLOG.md (inyectado al iniciar sesión, %s)\\n\\n' \"$(date '+%Y-%m-%d %H:%M')\"; cat '/Users/luisfer/dev/trading-bot/CLAWBOT-BACKLOG.md' 2>/dev/null || echo '(sin backlog)'"
+          }
+        ]
+      }
+    ]
+  }
+}
