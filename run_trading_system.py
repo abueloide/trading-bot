@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("horse_race")
 
-SLICE = 33_000.0  # virtual cash per strategy (paper)
+SLICE = 25_000.0  # virtual cash per strategy (paper) — 4 horses × $25k = $100k
 STATE_PATH = Path("data/ledgers/state.json")
 REBALANCE_REFERENCE = "SPY"  # market-calendar anchor for the monthly rebalance
 
