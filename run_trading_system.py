@@ -51,6 +51,11 @@ STRATEGIES = [
     StrategyConfig("momentum_rotation", UNIVERSE, SLICE, max_positions=15),
     StrategyConfig("confirmed_mr", UNIVERSE, SLICE, max_positions=10),
     StrategyConfig("rsi_mr", UNIVERSE, SLICE, max_positions=10),
+    # 4th horse: same momentum engine + AlphaVantage news-sentiment veto.
+    # The differentiation bet — see live/news_overlay.py. Paper account has 4x
+    # buying power, so this 4th $33k slice deploys without crowding the others.
+    StrategyConfig("momentum_news", UNIVERSE, SLICE, max_positions=15,
+                   news_overlay=True),
 ]
 
 

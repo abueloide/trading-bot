@@ -211,6 +211,15 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "max_hold_days": None,  # rebalanced monthly
         "description": "6-month momentum, skip last month, monthly rebalance",
     },
+    "momentum_news": {
+        # Same momentum engine; the news-sentiment veto is applied as a
+        # portfolio overlay in the orchestrator (StrategyConfig.news_overlay),
+        # not in the per-bar signal, so the registry fn stays identical.
+        "fn": strategy_momentum_rotation,
+        "type": "momentum",
+        "max_hold_days": None,
+        "description": "Momentum rotation + AlphaVantage news-sentiment veto",
+    },
     "ema_crossover": {
         "fn": strategy_ema_crossover,
         "type": "breakout",

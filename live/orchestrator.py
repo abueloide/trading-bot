@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from live.news_overlay import apply_news_overlay, fetch_sentiment
 from live.portfolio_targets import (
     exit_signals,
     momentum_top,
@@ -38,6 +39,10 @@ LOOKBACK_BARS = 260  # ~1y of daily bars; enough for 200d / momentum filters.
 DEFAULT_SLOTS = {"momentum": 15, "mean_reversion": 10}
 _FALLBACK_SLOTS = 5
 
+# When a momentum horse runs a news overlay, rank a deeper pool so vetoed names
+# can be replaced by the next-best survivors instead of shrinking the basket.
+NEWS_POOL_FACTOR = 3
+
 
 @dataclass
 class StrategyConfig:
@@ -45,6 +50,7 @@ class StrategyConfig:
     symbols: List[str]
     starting_cash: float
     max_positions: Optional[int] = None  # override basket size; None → type default
+    news_overlay: bool = False  # momentum horses only: veto negative-news names
 
 
 def _last_price(df: Optional[pd.DataFrame]) -> Optional[float]:
@@ -62,14 +68,17 @@ class Orchestrator:
         executor: ExecutorPort,
         risk_config: Optional[dict] = None,
         initial_states: Optional[Dict[str, dict]] = None,
+        news_fetcher: Callable[[Sequence[str]], Dict[str, float]] = fetch_sentiment,
     ) -> None:
         self._bars = bars
         self._executor = executor
         self._risk = RiskManager(risk_config)
+        self._news_fetcher = news_fetcher
         self._runners: Dict[str, StrategyRunner] = {}
         self._portfolios: Dict[str, VirtualPortfolio] = {}
         self._symbols: Dict[str, List[str]] = {}
         self._slots: Dict[str, int] = {}
+        self._news_overlay: Dict[str, bool] = {}
         for c in configs:
             runner = StrategyRunner(c.strategy)
             self._runners[c.strategy] = runner
@@ -81,6 +90,7 @@ class Orchestrator:
             self._slots[c.strategy] = c.max_positions or DEFAULT_SLOTS.get(
                 runner.strategy_type, _FALLBACK_SLOTS
             )
+            self._news_overlay[c.strategy] = c.news_overlay
 
     def portfolio(self, strategy: str) -> VirtualPortfolio:
         return self._portfolios[strategy]
@@ -116,6 +126,26 @@ class Orchestrator:
 
     # ------------------------------------------------------------ momentum
 
+    def _momentum_basket(self, name: str, local, n: int) -> List[str]:
+        """Top-n momentum names, optionally filtered by news sentiment.
+
+        With the overlay on, rank a deeper pool and drop names carrying
+        materially negative news; survivors keep momentum order. If the news
+        feed returns nothing (no key, rate limit, error), the overlay is a
+        no-op and this degrades to plain momentum top-n.
+        """
+        if not self._news_overlay.get(name):
+            return momentum_top(local, n)
+        pool = momentum_top(local, n * NEWS_POOL_FACTOR)
+        sentiment = self._news_fetcher(pool)
+        basket = apply_news_overlay(pool, sentiment, n)
+        vetoed = len(pool[:n]) - len(set(basket) & set(pool[:n]))
+        logger.info(
+            "news overlay %s: pool=%d sentiment=%d basket=%d (vetoed≈%d)",
+            name, len(pool), len(sentiment), len(basket), max(vetoed, 0),
+        )
+        return basket
+
     def _run_momentum(self, runner, vp, local, is_rebalance_day: bool) -> None:
         held = {s for s in self._symbols[runner.name] if vp.qty(s) > 0}
         # Between monthly rebalances a populated book just rides; rotate only on
@@ -123,7 +153,7 @@ class Orchestrator:
         if held and not is_rebalance_day:
             return
         n = self._slots[runner.name]
-        top = momentum_top(local, n)
+        top = self._momentum_basket(runner.name, local, n)
         top_set = set(top)
         # Drop names that fell out of the top-N.
         for sym in sorted(held - top_set):

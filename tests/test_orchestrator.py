@@ -114,6 +114,49 @@ def test_momentum_rotates_on_rebalance_day():
     assert "A" not in sold    # still top-2 → held
 
 
+def test_news_overlay_vetoes_negative_name_and_refills_from_rank():
+    # STRONG has the best momentum but carries negative news → it must be vetoed
+    # and replaced by the next-best survivor.
+    execu = RecordingExecutor()
+    bars = KeyedBatchBars({
+        "STRONG": _ramp(2.0),
+        "MID": _ramp(1.0),
+        "WEAK": _ramp(0.5),
+    })
+    cfg = [StrategyConfig("momentum_news", list(bars._by), 30_000.0,
+                          max_positions=2, news_overlay=True)]
+    sentiment = {"STRONG": -0.40, "MID": 0.10, "WEAK": 0.05}
+    orch = Orchestrator(cfg, bars, execu, risk_config=_HORSE_RISK,
+                        news_fetcher=lambda tickers: sentiment)
+    orch.run_cycle()
+    bought = {b[0] for b in execu.buys}
+    assert bought == {"MID", "WEAK"}      # STRONG vetoed, refilled by WEAK
+    assert "STRONG" not in bought
+
+
+def test_news_overlay_degrades_to_pure_momentum_when_feed_empty():
+    # Feed returns nothing (rate-limited/no key) → overlay is a no-op.
+    execu = RecordingExecutor()
+    bars = KeyedBatchBars({"STRONG": _ramp(2.0), "MID": _ramp(1.0), "WEAK": _ramp(0.5)})
+    cfg = [StrategyConfig("momentum_news", list(bars._by), 30_000.0,
+                          max_positions=2, news_overlay=True)]
+    orch = Orchestrator(cfg, bars, execu, risk_config=_HORSE_RISK,
+                        news_fetcher=lambda tickers: {})
+    orch.run_cycle()
+    assert {b[0] for b in execu.buys} == {"STRONG", "MID"}  # plain top-2
+
+
+def test_news_fetcher_not_called_for_plain_momentum():
+    calls = []
+    execu = RecordingExecutor()
+    bars = KeyedBatchBars({"STRONG": _ramp(2.0), "MID": _ramp(1.0)})
+    cfg = [StrategyConfig("momentum_rotation", list(bars._by), 30_000.0, max_positions=2)]
+    orch = Orchestrator(cfg, bars, execu, risk_config=_HORSE_RISK,
+                        news_fetcher=lambda tickers: calls.append(tickers) or {})
+    orch.run_cycle()
+    assert calls == []  # overlay off → no API spend on the price-only horses
+
+
 def test_buy_signal_places_tagged_order_and_updates_ledger(oversold_then_bars):
     execu = RecordingExecutor()
     cfg = [StrategyConfig(strategy="confirmed_mr", symbols=["AAPL"], starting_cash=1000.0)]
