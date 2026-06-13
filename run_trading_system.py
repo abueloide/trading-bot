@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("horse_race")
 
-SLICE = 25_000.0  # virtual cash per strategy (paper) — 4 horses × $25k = $100k
+SLICE = 25_000.0  # virtual cash per strategy (paper) — 3 horses × $25k = $75k
 STATE_PATH = Path("data/ledgers/state.json")
 REBALANCE_REFERENCE = "SPY"  # market-calendar anchor for the monthly rebalance
 
@@ -51,11 +51,13 @@ STRATEGIES = [
     StrategyConfig("momentum_rotation", UNIVERSE, SLICE, max_positions=15),
     StrategyConfig("confirmed_mr", UNIVERSE, SLICE, max_positions=10),
     StrategyConfig("rsi_mr", UNIVERSE, SLICE, max_positions=10),
-    # 4th horse: same momentum engine + AlphaVantage news-sentiment veto.
-    # The differentiation bet — see live/news_overlay.py. Paper account has 4x
-    # buying power, so this 4th $33k slice deploys without crowding the others.
-    StrategyConfig("momentum_news", UNIVERSE, SLICE, max_positions=15,
-                   news_overlay=True),
+    # NOTE: a 4th horse (momentum_news) was retired 2026-06-13. It paired the
+    # momentum engine with an AlphaVantage NEWS_SENTIMENT veto, but the free tier
+    # cannot serve it: NEWS_SENTIMENT returns 0 articles for a multi-ticker basket
+    # (and "Invalid inputs" past ~15 tickers), so fetch_sentiment always came back
+    # empty and the overlay was a permanent no-op — momentum_news was byte-for-byte
+    # momentum_rotation. The overlay code (live/news_overlay.py) stays for a future
+    # revival with a per-ticker fetch + a paid/alternate news source.
 ]
 
 
