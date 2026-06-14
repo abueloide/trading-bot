@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import date
 from pathlib import Path
 from typing import Dict
 
@@ -17,6 +18,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from executor import Executor
+from live.benchmark import compute_benchmark
 from live.ledger_store import load_ledgers, save_ledgers
 from live.live_executor_adapter import LiveExecutorAdapter
 from live.orchestrator import LOOKBACK_BARS, Orchestrator, StrategyConfig
@@ -33,6 +35,11 @@ logger = logging.getLogger("horse_race")
 SLICE = 25_000.0  # virtual cash per strategy (paper) — 3 horses × $25k = $75k
 STATE_PATH = Path("data/ledgers/state.json")
 REBALANCE_REFERENCE = "SPY"  # market-calendar anchor for the monthly rebalance
+BENCHMARK_SYMBOL = "SPY"  # buy-and-hold yardstick for the alpha column
+# Inception of the clean $25k×N epoch: the ledgers were reset to $25k and all
+# horses read 0.00% on 2026-06-05 (see data/cron.log). Alpha is measured from
+# here so the benchmark covers the exact same window as the live ledgers.
+RACE_INCEPTION = date(2026, 6, 5)
 
 # Risk overlay tuned for a diversified equal-weight horse race: many small
 # equal-weight slots (momentum 15, MR 10), near-full deployment, no sector cap
@@ -116,8 +123,10 @@ def main() -> int:
     logger.info("ledger state saved to %s", STATE_PATH)
 
     marks = {sym: float(df["close"].iloc[-1]) for sym, df in snapshot.items() if len(df)}
-    rows = build_report(portfolios, marks=marks)
-    print(format_table(rows))
+    benchmark = compute_benchmark(snapshot, BENCHMARK_SYMBOL, RACE_INCEPTION)
+    benchmark_pct = benchmark["return_pct"] if benchmark else None
+    rows = build_report(portfolios, marks=marks, benchmark_pct=benchmark_pct)
+    print(format_table(rows, benchmark=benchmark))
     return 0
 
 
