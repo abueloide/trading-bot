@@ -68,10 +68,19 @@ class YFinanceBars:
                 continue
             if raw is None or raw.empty:
                 continue
+            # group_by="ticker" yields MultiIndex (ticker, field) columns — even
+            # for a single ticker, so we always index by symbol when the columns
+            # are MultiIndexed. A flat frame only maps to a lone-symbol chunk.
+            multiindexed = isinstance(raw.columns, pd.MultiIndex)
             for sym in chunk:
-                try:
-                    sub = raw[sym] if len(chunk) > 1 else raw
-                except (KeyError, IndexError):
+                if multiindexed:
+                    try:
+                        sub = raw[sym]
+                    except (KeyError, IndexError):
+                        continue
+                else:
+                    sub = raw if len(chunk) == 1 else None
+                if sub is None:
                     continue
                 norm = _normalize(sub, lookback)
                 if norm is not None:
