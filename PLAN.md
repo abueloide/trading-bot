@@ -8,9 +8,9 @@
 1. **[EN CURSO] Medir edge contra benchmark, no solo entre caballos.**
    - [x] Benchmark SPY buy&hold + columna `alpha%` en el reporte (`live/benchmark.py`, anclado al 2026-06-05). Hecho 2026-06-14, 63/63 tests verde.
    - [ ] Dejar acumular alpha hasta cerrar la ventana de 2 semanas del epoch limpio (~2026-06-19). Leer `alpha%`: si ningún caballo es alpha-positivo y estable, NO hay edge.
-   - [ ] (Mejora) Persistir snapshot diario de equity/alpha por caballo para una curva, no solo el último corte.
+   - [x] (Mejora) Persistir snapshot diario de equity/alpha por caballo para una curva, no solo el último corte. Hecho 2026-06-14: `live/equity_snapshot.py` (JSONL append-only, idempotente por día) cableado en `run_trading_system.py` → `data/ledgers/equity_curve.jsonl`. 68/68 tests verde. Empieza a acumular en la próxima corrida L-V.
 
-2. **[PENDIENTE] Métrica de riesgo, no solo retorno.** Un caballo que gana con drawdown brutal no es edge. Añadir max-drawdown y/o vol al reporte una vez haya serie temporal de equity.
+2. **[PENDIENTE — desbloqueado] Métrica de riesgo, no solo retorno.** Un caballo que gana con drawdown brutal no es edge. Ya hay serie temporal de equity (`equity_curve.jsonl`): añadir max-drawdown y/o vol al reporte leyendo esa curva. Necesita ~varios días de snapshots acumulados para ser útil.
 
 3. **[PENDIENTE — decisión operador] Checkpoint de 2 semanas.** Al cierre de la ventana: leer attribution + alpha y decidir con Luis. Solo si hay alpha real y consistente → recién evaluar $250 vivo con tope + kill-switch (ver `docs/ROADMAP-real-money.md`). NO antes. Esta decisión es de Luis (dinero/irreversible).
 

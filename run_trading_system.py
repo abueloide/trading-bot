@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from executor import Executor
 from live.benchmark import compute_benchmark
+from live.equity_snapshot import append_snapshot
 from live.ledger_store import load_ledgers, save_ledgers
 from live.live_executor_adapter import LiveExecutorAdapter
 from live.orchestrator import LOOKBACK_BARS, Orchestrator, StrategyConfig
@@ -34,6 +35,7 @@ logger = logging.getLogger("horse_race")
 
 SLICE = 25_000.0  # virtual cash per strategy (paper) — 3 horses × $25k = $75k
 STATE_PATH = Path("data/ledgers/state.json")
+EQUITY_CURVE_PATH = Path("data/ledgers/equity_curve.jsonl")
 REBALANCE_REFERENCE = "SPY"  # market-calendar anchor for the monthly rebalance
 BENCHMARK_SYMBOL = "SPY"  # buy-and-hold yardstick for the alpha column
 # Inception of the clean $25k×N epoch: the ledgers were reset to $25k and all
@@ -127,6 +129,17 @@ def main() -> int:
     benchmark_pct = benchmark["return_pct"] if benchmark else None
     rows = build_report(portfolios, marks=marks, benchmark_pct=benchmark_pct)
     print(format_table(rows, benchmark=benchmark))
+
+    # Persist a daily equity/alpha snapshot per horse so the 2-week checkpoint
+    # can read an equity *curve* (drawdown, alpha stability), not just the last
+    # cut. Stamp it with the latest bar's date (matches the benchmark window and
+    # stays idempotent if the cron re-fires the same session).
+    snapshot_day = max(
+        (df.index[-1].date() for df in snapshot.values() if len(df)),
+        default=date.today(),
+    )
+    append_snapshot(rows, benchmark_pct, snapshot_day, EQUITY_CURVE_PATH)
+    logger.info("equity snapshot appended for %s to %s", snapshot_day, EQUITY_CURVE_PATH)
     return 0
 
 
