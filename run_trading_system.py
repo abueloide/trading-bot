@@ -57,6 +57,19 @@ HORSE_RISK_CONFIG = {
 
 # The full S&P 500 universe feeds every strategy; each builds its own basket.
 UNIVERSE = sp500_symbols()
+
+# Symbols fetched in the batch = the tradeable universe PLUS the benchmark /
+# rebalance yardstick (SPY). SPY is NOT an S&P 500 constituent, so without this
+# it was never in the snapshot and compute_benchmark() silently returned None on
+# every run (alpha_pct: null in the equity curve, alpha column dropped from the
+# report). The orchestrator only ever requests its own strategy symbols from the
+# cache, so SPY's bars feed the benchmark and the rebalance calendar without ever
+# becoming a tradeable position.
+_EXTRA_SYMBOLS = list(
+    dict.fromkeys(s for s in (BENCHMARK_SYMBOL, REBALANCE_REFERENCE) if s not in UNIVERSE)
+)
+FETCH_SYMBOLS = list(UNIVERSE) + _EXTRA_SYMBOLS
+
 STRATEGIES = [
     StrategyConfig("momentum_rotation", UNIVERSE, SLICE, max_positions=15),
     StrategyConfig("confirmed_mr", UNIVERSE, SLICE, max_positions=10),
@@ -102,14 +115,15 @@ def main() -> int:
             f"(got {base_url!r}). This bot only runs on paper."
         )
 
-    logger.info("fetching bars for %d symbols (batch)...", len(UNIVERSE))
-    snapshot = YFinanceBars().get_bars_batch(UNIVERSE, LOOKBACK_BARS)
+    logger.info("fetching bars for %d symbols (batch)...", len(FETCH_SYMBOLS))
+    snapshot = YFinanceBars().get_bars_batch(FETCH_SYMBOLS, LOOKBACK_BARS)
     if not snapshot:
         raise SystemExit("No bars returned for the universe; aborting (no trades).")
     cached = CachedBars(snapshot)
     is_rebalance = _is_first_trading_day_of_month(snapshot)
-    logger.info("universe bars: %d/%d usable; rebalance_day=%s",
-                len(snapshot), len(UNIVERSE), is_rebalance)
+    logger.info("universe bars: %d/%d usable; benchmark(%s)=%s; rebalance_day=%s",
+                len(snapshot), len(FETCH_SYMBOLS), BENCHMARK_SYMBOL,
+                BENCHMARK_SYMBOL in snapshot, is_rebalance)
 
     initial_states = load_ledgers(STATE_PATH)
     executor = Executor()
