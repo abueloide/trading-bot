@@ -29,7 +29,13 @@ Llaves reales viejas en `~/.trading-secrets-quarantine-20260531/` (chmod 700). R
 
 ## Diferido (post-edge)
 
-`check_time_exits` no cableado (necesita reconciliación de ledger) · cripto · push/PR de la rama `feature/paper-horse-race` (NO mergeada) · refresco manual del snapshot S&P 500 (script build-time) cuando cambie la membresía.
+`check_time_exits` no cableado (necesita reconciliación de ledger) · push/PR de la rama `feature/paper-horse-race` (NO mergeada) · refresco manual del snapshot S&P 500 (script build-time) cuando cambie la membresía.
+
+### Nuevos mercados — crypto / forex (idea Luis 2026-06-15, PARKED hasta checkpoint de edge)
+
+Regla: **no se abre mercado nuevo hasta que las acciones muestren aunque sea un asomo de edge** (alpha vs SPY positivo y no concentrado). Multiplicar mercados antes dispersa el foco sin responder la única pregunta (¿hay edge?).
+- **Crypto = candidato razonable.** Plumbing a medias: `crypto_client.py` (Binance, soporta testnet/paper, misma interfaz que Alpaca) PERO no cableado al orquestador vivo. Bloqueos: (1) llaves Binance en cuarentena → necesita creds **testnet** nuevas, NUNCA las de mainnet; (2) 24/7 rompe el modelo de cron diario L-V; (3) extender el framework horse-race+alpha a crypto. Encaja en el mismo rig si se hace bien.
+- **Forex = NO.** Bróker nuevo desde cero, apalancamiento = riesgo de reventar cuenta, stats de retail las peores. Fuera de alcance.
 
 ## NO romper
 
