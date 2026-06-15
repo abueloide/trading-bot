@@ -19,8 +19,9 @@ from dotenv import load_dotenv
 
 from executor import Executor
 from live.benchmark import compute_benchmark
-from live.equity_snapshot import append_snapshot
+from live.equity_snapshot import append_snapshot, load_snapshots
 from live.ledger_store import load_ledgers, save_ledgers
+from live.risk_metrics import compute_risk_metrics, format_risk_table
 from live.live_executor_adapter import LiveExecutorAdapter
 from live.orchestrator import LOOKBACK_BARS, Orchestrator, StrategyConfig
 from live.yfinance_bars import CachedBars, YFinanceBars
@@ -140,6 +141,12 @@ def main() -> int:
     )
     append_snapshot(rows, benchmark_pct, snapshot_day, EQUITY_CURVE_PATH)
     logger.info("equity snapshot appended for %s to %s", snapshot_day, EQUITY_CURVE_PATH)
+
+    # Risk side of the ledger: a horse can lead on return while riding a brutal
+    # drawdown. Read the curve we just extended and print max-drawdown / vol so
+    # the 2-week checkpoint reads risk-adjusted, not raw, return.
+    risk = compute_risk_metrics(load_snapshots(EQUITY_CURVE_PATH))
+    print(format_risk_table(risk))
     return 0
 
 

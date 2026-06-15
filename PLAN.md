@@ -10,7 +10,9 @@
    - [ ] Dejar acumular alpha hasta cerrar la ventana de 2 semanas del epoch limpio (~2026-06-19). Leer `alpha%`: si ningún caballo es alpha-positivo y estable, NO hay edge.
    - [x] (Mejora) Persistir snapshot diario de equity/alpha por caballo para una curva, no solo el último corte. Hecho 2026-06-14: `live/equity_snapshot.py` (JSONL append-only, idempotente por día) cableado en `run_trading_system.py` → `data/ledgers/equity_curve.jsonl`. 68/68 tests verde. Empieza a acumular en la próxima corrida L-V.
 
-2. **[PENDIENTE — desbloqueado] Métrica de riesgo, no solo retorno.** Un caballo que gana con drawdown brutal no es edge. Ya hay serie temporal de equity (`equity_curve.jsonl`): añadir max-drawdown y/o vol al reporte leyendo esa curva. Necesita ~varios días de snapshots acumulados para ser útil.
+2. **[HECHO — esperando data] Métrica de riesgo, no solo retorno.** Un caballo que gana con drawdown brutal no es edge.
+   - [x] `live/risk_metrics.py`: max-drawdown (peak-to-trough) + volatilidad (stdev de retornos diarios) por caballo, leyendo `equity_curve.jsonl`. Cableado en `run_trading_system.py` → imprime tabla de riesgo tras el snapshot. Hecho 2026-06-15, 77/77 tests verde (9 nuevos en `test_risk_metrics.py`).
+   - [ ] Los números solo son útiles con ~varios días de curva acumulada (empieza a llenarse en la próxima corrida L-V). Leer en el checkpoint junto a alpha.
 
 3. **[PENDIENTE — decisión operador] Checkpoint de 2 semanas.** Al cierre de la ventana: leer attribution + alpha y decidir con Luis. Solo si hay alpha real y consistente → recién evaluar $250 vivo con tope + kill-switch (ver `docs/ROADMAP-real-money.md`). NO antes. Esta decisión es de Luis (dinero/irreversible).
 
