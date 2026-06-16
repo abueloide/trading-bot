@@ -11,7 +11,7 @@ import logging
 import os
 from datetime import date
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -106,6 +106,31 @@ def _is_first_trading_day_of_month(snapshot: Dict[str, pd.DataFrame]) -> bool:
     return not earlier_same_month
 
 
+def resolve_benchmark(
+    snapshot: Dict[str, pd.DataFrame],
+    inception: date = RACE_INCEPTION,
+) -> Tuple[Optional[dict], Optional[float]]:
+    """Compute the SPY buy&hold benchmark, loudly flagging the silent-null case.
+
+    The alpha column went dark for 10 days because ``compute_benchmark`` returned
+    None every run and nothing complained — every equity-curve snapshot quietly
+    carried ``alpha_pct: null``. If the benchmark can't be computed, alpha is null
+    for the whole window, so shout it into ``cron.log`` here instead of letting the
+    2-week checkpoint discover a useless curve. ``in_snapshot`` distinguishes the
+    "SPY never fetched" bug from the subtler "fetched but no usable bar at/after
+    inception" one.
+    """
+    benchmark = compute_benchmark(snapshot, BENCHMARK_SYMBOL, inception)
+    if benchmark is None:
+        logger.warning(
+            "benchmark %s could not be computed (in_snapshot=%s) -> alpha will be "
+            "null this run; check the SPY fetch/inception wiring",
+            BENCHMARK_SYMBOL, BENCHMARK_SYMBOL in snapshot,
+        )
+        return None, None
+    return benchmark, benchmark["return_pct"]
+
+
 def main() -> int:
     load_dotenv()
     base_url = os.getenv("ALPACA_BASE_URL", "")
@@ -140,8 +165,7 @@ def main() -> int:
     logger.info("ledger state saved to %s", STATE_PATH)
 
     marks = {sym: float(df["close"].iloc[-1]) for sym, df in snapshot.items() if len(df)}
-    benchmark = compute_benchmark(snapshot, BENCHMARK_SYMBOL, RACE_INCEPTION)
-    benchmark_pct = benchmark["return_pct"] if benchmark else None
+    benchmark, benchmark_pct = resolve_benchmark(snapshot)
     rows = build_report(portfolios, marks=marks, benchmark_pct=benchmark_pct)
     print(format_table(rows, benchmark=benchmark))
 
