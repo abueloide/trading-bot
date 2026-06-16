@@ -22,29 +22,61 @@ def _snap(date_str, strategy, equity, return_pct, alpha_pct, benchmark_pct=0.0):
 
 
 # ---- classify_edge: descriptive verdicts only, never an automated decision ----
+# The verdict reads the *alpha series* (chronological, may carry null entries
+# from before the benchmark was wired) — not a single latest value — so it can
+# gate on real alpha observations and judge stability, both of which feed the
+# operator's irreversible real-money call.
 
-def test_classify_inconclusive_when_too_few_days():
-    v = classify_edge(alpha_pct=5.0, max_drawdown_pct=-2.0, n_days=2, min_days=5)
+def test_classify_inconclusive_when_too_few_alpha_days():
+    v = classify_edge(alpha_series=[5.0, 5.0], max_drawdown_pct=-2.0, min_days=5)
     assert "inconclusive" in v.lower()
 
 
-def test_classify_no_benchmark_when_alpha_missing():
-    v = classify_edge(alpha_pct=None, max_drawdown_pct=-2.0, n_days=10, min_days=5)
+def test_classify_no_benchmark_when_no_real_alpha():
+    v = classify_edge(alpha_series=[None, None, None], max_drawdown_pct=-2.0, min_days=5)
     assert "no benchmark" in v.lower()
 
 
-def test_classify_no_edge_when_alpha_not_positive():
-    v = classify_edge(alpha_pct=-0.5, max_drawdown_pct=-2.0, n_days=10, min_days=5)
+def test_classify_counts_real_alpha_days_ignoring_null_prefix():
+    # Equity curve ran longer, but alpha only became real for 3 days → still
+    # inconclusive at min 5. This is the exact prod shape after the SPY-null bug:
+    # null alpha 06-05..06-15, real alpha from 06-16. Gating on equity-days would
+    # overstate confidence; gating on real alpha-days does not.
+    v = classify_edge(
+        alpha_series=[None, None, None, 1.0, 2.0, 3.0],
+        max_drawdown_pct=-2.0,
+        min_days=5,
+    )
+    assert "inconclusive" in v.lower()
+
+
+def test_classify_no_edge_when_latest_alpha_not_positive():
+    v = classify_edge(
+        alpha_series=[1.0, 2.0, 1.0, 0.5, -0.5], max_drawdown_pct=-2.0, min_days=5
+    )
     assert "no edge" in v.lower()
 
 
-def test_classify_edge_candidate_when_alpha_positive_and_shallow_dd():
-    v = classify_edge(alpha_pct=3.0, max_drawdown_pct=-4.0, n_days=10, min_days=5)
+def test_classify_edge_candidate_when_alpha_positive_stable_shallow_dd():
+    v = classify_edge(
+        alpha_series=[2.0, 2.5, 3.0, 2.8, 3.2], max_drawdown_pct=-4.0, min_days=5
+    )
     assert "candidate" in v.lower()
 
 
+def test_classify_flags_unstable_when_alpha_dipped_nonpositive():
+    # Latest alpha is positive, but it went ≤0 within the window → not the
+    # "positivo y estable" the PLAN requires. A single last-day bounce is not edge.
+    v = classify_edge(
+        alpha_series=[1.0, -0.5, 0.2, 1.5, 2.0], max_drawdown_pct=-3.0, min_days=5
+    )
+    assert "unstable" in v.lower()
+
+
 def test_classify_flags_risk_when_alpha_positive_but_deep_dd():
-    v = classify_edge(alpha_pct=3.0, max_drawdown_pct=-25.0, n_days=10, min_days=5)
+    v = classify_edge(
+        alpha_series=[2.0, 2.5, 3.0, 2.8, 3.2], max_drawdown_pct=-25.0, min_days=5
+    )
     assert "risk" in v.lower()
 
 
@@ -94,6 +126,46 @@ def test_each_row_carries_a_verdict():
     row = build_checkpoint(snaps, min_days=1)[0]
     assert "verdict" in row
     assert isinstance(row["verdict"], str) and row["verdict"]
+
+
+def test_verdict_gates_on_real_alpha_days_not_equity_days():
+    # 5 equity days but alpha real only on the last 2 → inconclusive at min 5.
+    # The curve length must not buy confidence the alpha history can't back.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, None),
+        _snap("2026-06-16", "x", 101.0, 1.0, None),
+        _snap("2026-06-17", "x", 102.0, 2.0, None),
+        _snap("2026-06-18", "x", 103.0, 3.0, 1.0),
+        _snap("2026-06-19", "x", 104.0, 4.0, 2.0),
+    ]
+    row = build_checkpoint(snaps, min_days=5)[0]
+    assert row["n_days"] == 5  # equity-curve length unchanged
+    assert row["alpha_days"] == 2  # only two real alpha observations
+    assert "inconclusive" in row["verdict"].lower()
+
+
+def test_verdict_flags_unstable_alpha_through_build():
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, 1.0),
+        _snap("2026-06-16", "x", 99.0, -1.0, -0.5),  # dipped ≤0 mid-window
+        _snap("2026-06-17", "x", 101.0, 1.0, 0.4),
+        _snap("2026-06-18", "x", 103.0, 3.0, 1.6),
+        _snap("2026-06-19", "x", 105.0, 5.0, 2.2),  # latest positive
+    ]
+    row = build_checkpoint(snaps, min_days=5)[0]
+    assert "unstable" in row["verdict"].lower()
+
+
+def test_format_notes_alpha_lag_when_curve_longer_than_alpha():
+    # Curve has 3 days, alpha real for only 1 → the readout must say *why* the
+    # verdict can still be inconclusive even though the days column looks long.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, None),
+        _snap("2026-06-16", "x", 101.0, 1.0, None),
+        _snap("2026-06-17", "x", 102.0, 2.0, 1.0),
+    ]
+    out = format_checkpoint(build_checkpoint(snaps, min_days=2))
+    assert "alpha" in out.lower()
 
 
 # ---- format_checkpoint: readable single table + honest footer ----

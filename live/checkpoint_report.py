@@ -32,21 +32,53 @@ DEEP_DRAWDOWN_PCT = -15.0
 
 
 def classify_edge(
-    alpha_pct: Optional[float],
+    alpha_series: List[Optional[float]],
     max_drawdown_pct: Optional[float],
-    n_days: int,
     min_days: int = EDGE_MIN_DAYS,
 ) -> str:
-    """Plain-language reading of one horse's numbers. Never a decision."""
-    if n_days < min_days:
-        return f"inconclusive (need ≥{min_days} days)"
-    if alpha_pct is None:
+    """Plain-language reading of one horse's alpha *history*. Never a decision.
+
+    Reads the chronological alpha series rather than a single latest value, for
+    two reasons that both feed the operator's irreversible real-money call:
+
+    - **Real alpha-days, not equity-days.** Alpha is null until the benchmark is
+      wired; a long equity curve with a short alpha history must not buy
+      confidence the alpha data can't back. We gate on non-null observations.
+    - **Stability, not a last-day bounce.** The PLAN requires alpha "positivo y
+      estable". A horse whose alpha dipped ≤0 within the window and only just
+      turned positive is flagged as unstable, not waved through as a candidate.
+    """
+    real = [a for a in alpha_series if a is not None]
+    if not real:
         return "no benchmark"
-    if alpha_pct <= 0:
+    if len(real) < min_days:
+        return f"inconclusive (need ≥{min_days} alpha days)"
+    if real[-1] <= 0:
         return "no edge (alpha ≤ 0)"
+    if min(real) <= 0:
+        return "edge? but unstable (alpha dipped ≤0)"
     if max_drawdown_pct is not None and max_drawdown_pct < DEEP_DRAWDOWN_PCT:
         return "edge? but deep-drawdown risk"
     return "edge candidate"
+
+
+def _alpha_series_by_strategy(snapshots: List[dict]) -> Dict[str, List[Optional[float]]]:
+    """Chronological alpha values per strategy (null entries preserved).
+
+    Order is by ISO date so ``classify_edge`` can read the latest value and the
+    window's history. Nulls are kept so the count of *real* alpha observations
+    stays honest — they are filtered inside the verdict, not here.
+    """
+    dated: Dict[str, List[tuple]] = {}
+    for rec in snapshots:
+        strategy = rec.get("strategy")
+        if strategy is None:
+            continue
+        dated.setdefault(strategy, []).append((rec.get("date", ""), rec.get("alpha_pct")))
+    return {
+        strategy: [alpha for _, alpha in sorted(rows, key=lambda t: t[0])]
+        for strategy, rows in dated.items()
+    }
 
 
 def _latest_by_strategy(snapshots: List[dict]) -> Dict[str, dict]:
@@ -73,26 +105,29 @@ def build_checkpoint(
     """
     latest = _latest_by_strategy(snapshots)
     risk = compute_risk_metrics(snapshots)
+    alpha_series = _alpha_series_by_strategy(snapshots)
 
     rows: List[dict] = []
     for strategy, rec in latest.items():
         m = risk.get(strategy, {})
         max_dd = m.get("max_drawdown_pct")
         n_days = m.get("n_days", 0)
-        alpha = rec.get("alpha_pct")
+        series = alpha_series.get(strategy, [])
+        alpha_days = sum(1 for a in series if a is not None)
         rows.append(
             {
                 "strategy": strategy,
                 "date": rec.get("date"),
                 "equity": rec.get("equity"),
                 "return_pct": rec.get("return_pct"),
-                "alpha_pct": alpha,
+                "alpha_pct": rec.get("alpha_pct"),
                 "benchmark_pct": rec.get("benchmark_pct"),
                 "max_drawdown_pct": max_dd,
                 "volatility_pct": m.get("volatility_pct"),
                 "n_days": n_days,
+                "alpha_days": alpha_days,
                 "gap_days": m.get("gap_days", 0),
-                "verdict": classify_edge(alpha, max_dd, n_days, min_days),
+                "verdict": classify_edge(series, max_dd, min_days),
             }
         )
 
@@ -135,6 +170,20 @@ def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
         )
 
     lines.append("-" * len(header))
+    lagging = [
+        r for r in rows
+        if r.get("n_days", 0) >= min_days and r.get("alpha_days", r.get("n_days", 0)) < min_days
+    ]
+    if lagging:
+        detail = ", ".join(
+            f"{r['strategy']} ({r.get('alpha_days', 0)}/{r['n_days']})" for r in lagging
+        )
+        lines.append(
+            f"ℹ alpha lag: curve is ≥{min_days} days but alpha is real for fewer "
+            f"(strategy: alpha-days/curve-days → {detail}). Alpha was null before the "
+            "benchmark was wired, so the verdict gates on real alpha-days, not curve "
+            "length — that's why 'days' can look long while the verdict stays inconclusive."
+        )
     gappy = [r for r in rows if r.get("gap_days", 0) > 0]
     if gappy:
         detail = ", ".join(f"{r['strategy']} ({r['gap_days']})" for r in gappy)
