@@ -91,6 +91,7 @@ def build_checkpoint(
                 "max_drawdown_pct": max_dd,
                 "volatility_pct": m.get("volatility_pct"),
                 "n_days": n_days,
+                "gap_days": m.get("gap_days", 0),
                 "verdict": classify_edge(alpha, max_dd, n_days, min_days),
             }
         )
@@ -134,6 +135,14 @@ def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
         )
 
     lines.append("-" * len(header))
+    gappy = [r for r in rows if r.get("gap_days", 0) > 0]
+    if gappy:
+        detail = ", ".join(f"{r['strategy']} ({r['gap_days']})" for r in gappy)
+        lines.append(
+            f"⚠ GAP: equity curve is missing trading day(s) — {detail}. A skipped "
+            "cron run leaves holes; vol/max_dd treat a multi-day jump as one day, "
+            "so read those numbers with caution and check data/cron.log."
+        )
     lines.append(
         "Descriptive only — alpha% = return − SPY buy&hold; verdict is a reading "
         "of the numbers, NOT a decision."

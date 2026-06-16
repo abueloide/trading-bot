@@ -93,3 +93,44 @@ def test_format_table_lists_each_strategy():
 
 def test_format_table_empty_metrics():
     assert "no equity curve" in format_risk_table({}).lower()
+
+
+def test_contiguous_weekday_curve_has_no_gap():
+    # Mon→Tue→Wed: consecutive trading days, no missing weekday slots.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0),  # Mon
+        _snap("2026-06-16", "x", 101.0),  # Tue
+        _snap("2026-06-17", "x", 102.0),  # Wed
+    ]
+    assert compute_risk_metrics(snaps)["x"]["gap_days"] == 0
+
+
+def test_weekend_is_not_counted_as_a_gap():
+    # Fri→Mon skips Sat/Sun only: the bot runs L–V, so this is contiguous.
+    snaps = [
+        _snap("2026-06-19", "x", 100.0),  # Fri
+        _snap("2026-06-22", "x", 101.0),  # Mon
+    ]
+    assert compute_risk_metrics(snaps)["x"]["gap_days"] == 0
+
+
+def test_skipped_weekday_is_counted_as_a_gap():
+    # Mon→Wed skips Tue: one missing trading day → a real gap.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0),  # Mon
+        _snap("2026-06-17", "x", 102.0),  # Wed (Tue missing)
+    ]
+    assert compute_risk_metrics(snaps)["x"]["gap_days"] == 1
+
+
+def test_multiple_skipped_weekdays_accumulate():
+    # Mon→Fri with Tue/Wed/Thu all missing → 3 missing trading days.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0),  # Mon
+        _snap("2026-06-19", "x", 102.0),  # Fri
+    ]
+    assert compute_risk_metrics(snaps)["x"]["gap_days"] == 3
+
+
+def test_single_day_has_no_gap():
+    assert compute_risk_metrics([_snap("2026-06-15", "x", 100.0)])["x"]["gap_days"] == 0

@@ -117,3 +117,41 @@ def test_format_empty_is_friendly():
 
 def test_edge_min_days_is_a_sane_default():
     assert isinstance(EDGE_MIN_DAYS, int) and EDGE_MIN_DAYS >= 2
+
+
+# ---- gap detection: a curve with skipped trading days must not pass silently ----
+
+def test_row_carries_gap_days():
+    # Mon→Wed skips Tue → one missing trading day surfaced on the row.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, 0.0),  # Mon
+        _snap("2026-06-17", "x", 102.0, 2.0, 1.0),  # Wed (Tue missing)
+    ]
+    row = build_checkpoint(snaps)[0]
+    assert row["gap_days"] == 1
+
+
+def test_contiguous_curve_has_zero_gap_days():
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, 0.0),  # Mon
+        _snap("2026-06-16", "x", 101.0, 1.0, 0.5),  # Tue
+    ]
+    assert build_checkpoint(snaps)[0]["gap_days"] == 0
+
+
+def test_format_warns_when_curve_has_gaps():
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, 0.0),  # Mon
+        _snap("2026-06-17", "x", 102.0, 2.0, 1.0),  # Wed (Tue missing)
+    ]
+    out = format_checkpoint(build_checkpoint(snaps, min_days=1))
+    assert "gap" in out.lower()
+
+
+def test_format_no_gap_warning_on_contiguous_curve():
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, 0.0),  # Mon
+        _snap("2026-06-16", "x", 101.0, 1.0, 0.5),  # Tue
+    ]
+    out = format_checkpoint(build_checkpoint(snaps, min_days=1))
+    assert "missing trading day" not in out.lower()

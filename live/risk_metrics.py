@@ -14,18 +14,52 @@ Both are descriptive only — no decision is automated here. They feed the
 from __future__ import annotations
 
 import statistics
+from datetime import date, timedelta
 from typing import Dict, List, Optional
 
 
-def _equity_series(records: List[dict]) -> List[float]:
-    """Chronological list of usable equity marks for one strategy.
+def _usable_rows(records: List[dict]) -> List[dict]:
+    """Chronological usable snapshot rows for one strategy.
 
     Sorted by date; rows without a positive ``equity`` are dropped so a bad
     snapshot can't poison drawdown or inject a spurious return.
     """
     usable = [r for r in records if isinstance(r.get("equity"), (int, float)) and r["equity"] > 0]
     usable.sort(key=lambda r: r.get("date", ""))
-    return [float(r["equity"]) for r in usable]
+    return usable
+
+
+def _equity_series(records: List[dict]) -> List[float]:
+    """Chronological list of usable equity marks for one strategy."""
+    return [float(r["equity"]) for r in _usable_rows(records)]
+
+
+def _missing_weekdays(dates: List[str]) -> int:
+    """Count weekday (Mon–Fri) slots missing between first and last snapshot.
+
+    The bot runs L–V, so a contiguous curve has one mark per trading weekday.
+    Weekends are never counted; a skipped Tuesday is. A non-zero result means
+    the equity curve has holes — vol/drawdown computed over it treats a
+    multi-day jump as one day's move, so the numbers must be read with caution.
+    Unparseable dates are ignored rather than crashing the readout.
+    """
+    parsed: List[date] = []
+    for d in dates:
+        try:
+            parsed.append(date.fromisoformat(d))
+        except (TypeError, ValueError):
+            continue
+    if len(parsed) < 2:
+        return 0
+    parsed.sort()
+    expected = 0
+    cur = parsed[0]
+    while cur <= parsed[-1]:
+        if cur.weekday() < 5:  # Mon=0 … Fri=4
+            expected += 1
+        cur += timedelta(days=1)
+    present = len({d.isoformat() for d in parsed})
+    return max(0, expected - present)
 
 
 def _max_drawdown_pct(series: List[float]) -> float:
@@ -59,13 +93,15 @@ def compute_risk_metrics(snapshots: List[dict]) -> Dict[str, dict]:
 
     metrics: Dict[str, dict] = {}
     for strategy, records in by_strategy.items():
-        series = _equity_series(records)
-        if not series:
+        rows = _usable_rows(records)
+        if not rows:
             continue
+        series = [float(r["equity"]) for r in rows]
         metrics[strategy] = {
             "max_drawdown_pct": _max_drawdown_pct(series),
             "volatility_pct": _volatility_pct(series),
             "n_days": len(series),
+            "gap_days": _missing_weekdays([r.get("date", "") for r in rows]),
         }
     return metrics
 
