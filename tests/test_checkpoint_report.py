@@ -227,3 +227,35 @@ def test_format_no_gap_warning_on_contiguous_curve():
     ]
     out = format_checkpoint(build_checkpoint(snaps, min_days=1))
     assert "missing trading day" not in out.lower()
+
+
+# ---- risk window disclosure: max_dd%/vol% cover the curve, return% covers the
+# epoch since inception. The curve started accumulating ~10 days after inception,
+# so a drawdown before the first snapshot is invisible to max_dd — the readout
+# must say so, or max_dd reads as "worst since inception" when it is not.
+
+def test_row_carries_curve_window_bounds():
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, None),
+        _snap("2026-06-16", "x", 101.0, 1.0, 0.5),
+    ]
+    row = build_checkpoint(snaps)[0]
+    assert row["curve_start"] == "2026-06-15"
+    assert row["curve_end"] == "2026-06-16"
+
+
+def test_format_discloses_risk_window_covers_curve_only():
+    # return%/equity are since inception; max_dd%/vol% only cover the curve.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, None),
+        _snap("2026-06-16", "x", 101.0, 1.0, 0.5),
+    ]
+    out = format_checkpoint(build_checkpoint(snaps, min_days=1))
+    assert "risk window" in out.lower()
+    # Names the curve start so max_dd is never read as inception-to-date.
+    assert "2026-06-15" in out
+
+
+def test_risk_window_note_absent_when_no_curve():
+    out = format_checkpoint([])
+    assert "risk window" not in out.lower()

@@ -81,6 +81,32 @@ def _alpha_series_by_strategy(snapshots: List[dict]) -> Dict[str, List[Optional[
     }
 
 
+def _curve_window_by_strategy(
+    snapshots: List[dict],
+) -> Dict[str, tuple[Optional[str], Optional[str]]]:
+    """Earliest and latest snapshot date per strategy (the curve's real span).
+
+    ``max_dd``/``vol`` only cover this window, while ``return%``/``equity`` are
+    cumulative since inception — which predates the curve, because snapshots only
+    started accumulating ~10 days into the race. Surfacing the window keeps a
+    drawdown that happened *before* the first snapshot from hiding behind a
+    reassuring ``max_dd``.
+    """
+    dates: Dict[str, List[str]] = {}
+    for rec in snapshots:
+        strategy = rec.get("strategy")
+        if strategy is None:
+            continue
+        day = rec.get("date")
+        if day:
+            dates.setdefault(strategy, []).append(day)
+    return {
+        strategy: (min(days), max(days))
+        for strategy, days in dates.items()
+        if days
+    }
+
+
 def _latest_by_strategy(snapshots: List[dict]) -> Dict[str, dict]:
     """Most recent snapshot row per strategy (by ISO date string)."""
     latest: Dict[str, dict] = {}
@@ -106,6 +132,7 @@ def build_checkpoint(
     latest = _latest_by_strategy(snapshots)
     risk = compute_risk_metrics(snapshots)
     alpha_series = _alpha_series_by_strategy(snapshots)
+    windows = _curve_window_by_strategy(snapshots)
 
     rows: List[dict] = []
     for strategy, rec in latest.items():
@@ -114,6 +141,7 @@ def build_checkpoint(
         n_days = m.get("n_days", 0)
         series = alpha_series.get(strategy, [])
         alpha_days = sum(1 for a in series if a is not None)
+        start, end = windows.get(strategy, (None, None))
         rows.append(
             {
                 "strategy": strategy,
@@ -127,6 +155,8 @@ def build_checkpoint(
                 "n_days": n_days,
                 "alpha_days": alpha_days,
                 "gap_days": m.get("gap_days", 0),
+                "curve_start": start,
+                "curve_end": end,
                 "verdict": classify_edge(series, max_dd, min_days),
             }
         )
@@ -183,6 +213,16 @@ def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
             f"(strategy: alpha-days/curve-days → {detail}). Alpha was null before the "
             "benchmark was wired, so the verdict gates on real alpha-days, not curve "
             "length — that's why 'days' can look long while the verdict stays inconclusive."
+        )
+    starts = [r["curve_start"] for r in rows if r.get("curve_start")]
+    ends = [r["curve_end"] for r in rows if r.get("curve_end")]
+    if starts and ends:
+        lines.append(
+            f"ℹ risk window: max_dd%/vol% cover the equity curve only "
+            f"({min(starts)} → {max(ends)}); return%/equity are cumulative since "
+            "inception, which predates the curve — any drawdown before the curve "
+            "started is NOT in max_dd. Read max_dd as worst-since-curve-start, not "
+            "worst-since-inception."
         )
     gappy = [r for r in rows if r.get("gap_days", 0) > 0]
     if gappy:
