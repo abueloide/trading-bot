@@ -37,6 +37,10 @@ DEEP_DRAWDOWN_PCT = -15.0
 # exactly the false positive 3 horses × ~10 days will manufacture by luck.
 MIN_ALPHA_SIGNAL_RATIO = 1.0
 
+# The one verdict string that reads as a real go-look signal for the operator.
+# Kept as a constant so the selection-bias note and classify_edge can't drift.
+EDGE_CANDIDATE_VERDICT = "edge candidate"
+
 
 def _alpha_signal_ratio(real_alpha: List[float]) -> Optional[float]:
     """Mean alpha divided by its sample stdev (a crude information ratio).
@@ -87,7 +91,7 @@ def classify_edge(
     ratio = _alpha_signal_ratio(real)
     if ratio is not None and ratio < MIN_ALPHA_SIGNAL_RATIO:
         return "edge? but within noise (alpha < its own swing)"
-    return "edge candidate"
+    return EDGE_CANDIDATE_VERDICT
 
 
 def _alpha_series_by_strategy(snapshots: List[dict]) -> Dict[str, List[Optional[float]]]:
@@ -199,6 +203,35 @@ def build_checkpoint(
     return rows
 
 
+def _selection_bias_note(rows: List[dict]) -> Optional[str]:
+    """Warn that reading the *best* of N horses inflates the apparent edge.
+
+    The PLAN names this as the central statistical risk: with 3 horses over
+    ~10 days, the single best one beating SPY is partly a selection effect, not
+    proof of skill. ``classify_edge`` gates each horse against its *own* noise,
+    but it can't see that the operator will look at the winner — and the chance
+    that the best of N independent horses clears the bar by luck scales roughly
+    with N. So a lone "edge candidate" among several compared horses deserves a
+    higher bar than the same verdict from a single horse.
+
+    Returns ``None`` (no note) unless at least two horses carry a real verdict
+    *and* at least one reads as a candidate. Descriptive only.
+    """
+    judged = [r for r in rows if r.get("verdict") not in (None, "no benchmark")]
+    candidates = [r for r in judged if r.get("verdict") == EDGE_CANDIDATE_VERDICT]
+    if len(judged) < 2 or not candidates:
+        return None
+    names = ", ".join(r["strategy"] for r in candidates)
+    return (
+        f"⚠ selection bias: {len(candidates)} of {len(judged)} compared horses "
+        f"read as '{EDGE_CANDIDATE_VERDICT}' ({names}). You're picking the best of "
+        f"{len(judged)} — the odds that *some* horse beats SPY by luck scale with "
+        "the number of horses, so the winner's edge is biased upward. Treat a "
+        "candidate here as promising, NOT proven: require it to persist (and ideally "
+        "repeat out-of-sample) before it counts toward the real-money call."
+    )
+
+
 def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
     """Render the consolidated checkpoint table with an honest footer."""
     if not rows:
@@ -264,6 +297,9 @@ def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
             "cron run leaves holes; vol/max_dd treat a multi-day jump as one day, "
             "so read those numbers with caution and check data/cron.log."
         )
+    selection_note = _selection_bias_note(rows)
+    if selection_note:
+        lines.append(selection_note)
     lines.append(
         "Descriptive only — alpha% = return − SPY buy&hold; verdict is a reading "
         "of the numbers, NOT a decision."

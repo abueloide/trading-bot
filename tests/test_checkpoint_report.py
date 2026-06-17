@@ -306,3 +306,48 @@ def test_format_discloses_risk_window_covers_curve_only():
 def test_risk_window_note_absent_when_no_curve():
     out = format_checkpoint([])
     assert "risk window" not in out.lower()
+
+
+# ---- selection-bias note: reading the best of N horses inflates the edge ----
+# The PLAN's central statistical risk: with several horses over a short window,
+# the single best one beating SPY is partly a selection effect. classify_edge
+# judges each horse against its own noise but can't see we'll pick the winner.
+
+def test_format_warns_selection_bias_when_candidate_among_several():
+    # winner: flat positive alpha over 3 days → "edge candidate".
+    winner = [
+        _snap("2026-06-15", "winner", 110.0, 10.0, 5.0),
+        _snap("2026-06-16", "winner", 110.0, 10.0, 5.0),
+        _snap("2026-06-17", "winner", 110.0, 10.0, 5.0),
+    ]
+    # loser: latest alpha ≤ 0 → judged but "no edge", so a real comparison set.
+    loser = [
+        _snap("2026-06-15", "loser", 90.0, -10.0, -5.0),
+        _snap("2026-06-16", "loser", 90.0, -10.0, -5.0),
+        _snap("2026-06-17", "loser", 90.0, -10.0, -5.0),
+    ]
+    out = format_checkpoint(build_checkpoint(winner + loser, min_days=3), min_days=3)
+    assert "selection bias" in out.lower()
+    assert "best of" in out.lower()
+    # Names the candidate and stays descriptive (promising, not proven).
+    assert "winner" in out
+    assert "not proven" in out.lower()
+
+
+def test_no_selection_bias_note_for_a_single_candidate_horse():
+    # One horse alone: no best-of-N effect to warn about.
+    only = [
+        _snap("2026-06-15", "solo", 110.0, 10.0, 5.0),
+        _snap("2026-06-16", "solo", 110.0, 10.0, 5.0),
+        _snap("2026-06-17", "solo", 110.0, 10.0, 5.0),
+    ]
+    out = format_checkpoint(build_checkpoint(only, min_days=3), min_days=3)
+    assert "selection bias" not in out.lower()
+
+
+def test_no_selection_bias_note_when_no_candidate():
+    # Several horses but none reads as a candidate → nothing to over-credit.
+    a = [_snap("2026-06-16", "a", 90.0, -10.0, -5.0), _snap("2026-06-17", "a", 90.0, -10.0, -5.0)]
+    b = [_snap("2026-06-16", "b", 95.0, -5.0, -2.0), _snap("2026-06-17", "b", 95.0, -5.0, -2.0)]
+    out = format_checkpoint(build_checkpoint(a + b, min_days=2), min_days=2)
+    assert "selection bias" not in out.lower()
