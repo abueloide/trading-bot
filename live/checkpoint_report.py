@@ -180,9 +180,13 @@ def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
             "L–V cron run)."
         )
 
+    # Two distinct day counts: `days` is the equity-curve length (drives
+    # max_dd%/vol%), `αdays` is the count of real alpha observations (drives the
+    # verdict). They diverge while alpha is null pre-benchmark, so showing only
+    # one would let a reader misjudge how close a horse is to a verdict.
     header = (
         f"{'strategy':<20}{'equity':>12}{'return%':>10}{'alpha%':>9}"
-        f"{'max_dd%':>10}{'vol%':>9}{'days':>6}  verdict"
+        f"{'max_dd%':>10}{'vol%':>9}{'days':>6}{'αdays':>7}  verdict"
     )
     lines = [header, "-" * len(header)]
     for r in rows:
@@ -196,7 +200,7 @@ def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
         ret = r["return_pct"] if r["return_pct"] is not None else 0.0
         lines.append(
             f"{r['strategy']:<20}{equity:>12.2f}{ret:>10.2f}{alpha_s}"
-            f"{dd_s}{vol_s}{r['n_days']:>6}  {r['verdict']}"
+            f"{dd_s}{vol_s}{r['n_days']:>6}{r.get('alpha_days', 0):>7}  {r['verdict']}"
         )
 
     lines.append("-" * len(header))

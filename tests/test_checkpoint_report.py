@@ -156,6 +156,30 @@ def test_verdict_flags_unstable_alpha_through_build():
     assert "unstable" in row["verdict"].lower()
 
 
+def test_format_table_shows_alpha_days_distinct_from_curve_days():
+    # The exact prod situation on 2026-06-16: 2 equity-days but alpha real for
+    # only 1 (it was null before the benchmark was wired). The verdict gates on
+    # alpha-days, so the table MUST surface that count — otherwise a reader sees
+    # "days: 2" next to "need ≥5 alpha days" and can't tell we have just 1.
+    # The alpha-lag note stays suppressed here (curve < min_days), so the column
+    # is the only honest signal.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, None),  # alpha null (pre-benchmark)
+        _snap("2026-06-16", "x", 109.2, 9.2, 9.2),   # first real alpha day
+    ]
+    rows = build_checkpoint(snaps, min_days=5)
+    assert rows[0]["n_days"] == 2
+    assert rows[0]["alpha_days"] == 1
+    out = format_checkpoint(rows, min_days=5)
+    # The header advertises an alpha-days column distinct from curve days.
+    header = out.splitlines()[0]
+    assert "αdays" in header
+    # The data row carries both counts: 2 curve days and 1 alpha day.
+    data_row = [ln for ln in out.splitlines() if ln.startswith("x")][0]
+    fields = data_row.split()
+    assert "2" in fields and "1" in fields
+
+
 def test_format_notes_alpha_lag_when_curve_longer_than_alpha():
     # Curve has 3 days, alpha real for only 1 → the readout must say *why* the
     # verdict can still be inconclusive even though the days column looks long.
