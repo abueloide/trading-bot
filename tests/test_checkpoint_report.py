@@ -80,6 +80,29 @@ def test_classify_flags_risk_when_alpha_positive_but_deep_dd():
     assert "risk" in v.lower()
 
 
+def test_classify_flags_within_noise_when_alpha_positive_but_jumpy():
+    # Every alpha observation is > 0 (so not "unstable") and the drawdown is
+    # shallow, yet the alpha swings so wildly that its mean is swamped by its own
+    # day-to-day dispersion. Over 3 horses × ~10 days, a horse can clear SPY by
+    # luck; an alpha whose signal is smaller than its noise is exactly that case.
+    # It must NOT read as a clean "edge candidate" — discipline over return.
+    v = classify_edge(
+        alpha_series=[0.1, 4.0, 0.2, 3.5, 0.15], max_drawdown_pct=-3.0, min_days=5
+    )
+    assert "noise" in v.lower()
+    assert "candidate" not in v.lower()
+
+
+def test_classify_candidate_survives_when_signal_beats_noise():
+    # Consistently positive AND tight: the mean alpha dwarfs its dispersion, so
+    # the within-noise gate must not fire — this is the genuine candidate shape.
+    v = classify_edge(
+        alpha_series=[3.0, 3.2, 2.9, 3.1, 3.05], max_drawdown_pct=-3.0, min_days=5
+    )
+    assert "candidate" in v.lower()
+    assert "noise" not in v.lower()
+
+
 # ---- build_checkpoint: latest cut per horse + merged risk + verdict ----
 
 def test_empty_snapshots_returns_empty():

@@ -13,6 +13,7 @@ means "worth Luis's attention", never "ship it".
 """
 from __future__ import annotations
 
+import statistics
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -29,6 +30,27 @@ EDGE_MIN_DAYS = 5
 # A positive-alpha horse that got there through a drawdown deeper than this is
 # flagged as risky rather than a clean candidate (descriptive threshold only).
 DEEP_DRAWDOWN_PCT = -15.0
+
+# Minimum ratio of mean alpha to its own dispersion for a horse to read as a
+# clean candidate. A crude information ratio: if the average daily alpha doesn't
+# clear its day-to-day standard deviation, the "edge" is smaller than its noise —
+# exactly the false positive 3 horses × ~10 days will manufacture by luck.
+MIN_ALPHA_SIGNAL_RATIO = 1.0
+
+
+def _alpha_signal_ratio(real_alpha: List[float]) -> Optional[float]:
+    """Mean alpha divided by its sample stdev (a crude information ratio).
+
+    Returns ``None`` when it can't be computed or is meaningless: fewer than two
+    observations (stdev undefined) or zero dispersion (a perfectly flat positive
+    alpha is *more* convincing, not less — never flag it as noise).
+    """
+    if len(real_alpha) < 2:
+        return None
+    dispersion = statistics.stdev(real_alpha)
+    if dispersion == 0:
+        return None
+    return statistics.fmean(real_alpha) / dispersion
 
 
 def classify_edge(
@@ -47,6 +69,9 @@ def classify_edge(
     - **Stability, not a last-day bounce.** The PLAN requires alpha "positivo y
       estable". A horse whose alpha dipped ≤0 within the window and only just
       turned positive is flagged as unstable, not waved through as a candidate.
+    - **Signal over noise.** Even an all-positive alpha can be a fluke if it
+      swings more than it averages. We require the mean alpha to clear its own
+      day-to-day dispersion before calling it a clean candidate.
     """
     real = [a for a in alpha_series if a is not None]
     if not real:
@@ -59,6 +84,9 @@ def classify_edge(
         return "edge? but unstable (alpha dipped ≤0)"
     if max_drawdown_pct is not None and max_drawdown_pct < DEEP_DRAWDOWN_PCT:
         return "edge? but deep-drawdown risk"
+    ratio = _alpha_signal_ratio(real)
+    if ratio is not None and ratio < MIN_ALPHA_SIGNAL_RATIO:
+        return "edge? but within noise (alpha < its own swing)"
     return "edge candidate"
 
 
