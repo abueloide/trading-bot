@@ -26,7 +26,8 @@
 
 3. **[PENDIENTE — decisión operador] Checkpoint de 2 semanas.** Al cierre de la ventana: leer attribution + alpha y decidir con Luis. Solo si hay alpha real y consistente → recién evaluar $250 vivo con tope + kill-switch (ver `docs/ROADMAP-real-money.md`). NO antes. Esta decisión es de Luis (dinero/irreversible).
 
-4. **[PENDIENTE] Vigilancia operativa.** Confirmar en `data/cron.log` que las corridas L-V se ejecutan sin error tras 13:00 CST.
+4. **[VERIFICADO 2026-06-17, loop] Vigilancia operativa.** Confirmar en `data/cron.log` que las corridas L-V se ejecutan sin error tras 13:00 CST.
+   - [x] Auditado el 2026-06-17: 14 corridas registradas (2026-06-02→06-17), **todas exit 0**, fechas L-V contiguas sin huecos (fines de semana saltados correctamente). `equity_curve.jsonl` con 06-15/16/17 × 3 caballos, contiguo. Benchmark SPY presente (`benchmark(SPY)=True`) en la última corrida. Sin acción de código requerida; re-auditar en cada checkpoint.
 
 5. **[DIFERIDO post-edge] Deuda técnica conocida:**
    - `check_time_exits` no cableado (necesita reconciliación de ledger por estrategia — mismo invariante CORE que SELL).
