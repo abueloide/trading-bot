@@ -58,8 +58,10 @@ def test_classify_no_edge_when_latest_alpha_not_positive():
 
 
 def test_classify_edge_candidate_when_alpha_positive_stable_shallow_dd():
+    # Cumulative alpha climbing steadily (+0.7, +0.5, +0.7, +0.5 per day): a
+    # consistently positive daily active return, shallow drawdown → clean candidate.
     v = classify_edge(
-        alpha_series=[2.0, 2.5, 3.0, 2.8, 3.2], max_drawdown_pct=-4.0, min_days=5
+        alpha_series=[1.0, 1.7, 2.2, 2.9, 3.4], max_drawdown_pct=-4.0, min_days=5
     )
     assert "candidate" in v.lower()
 
@@ -81,11 +83,11 @@ def test_classify_flags_risk_when_alpha_positive_but_deep_dd():
 
 
 def test_classify_flags_within_noise_when_alpha_positive_but_jumpy():
-    # Every alpha observation is > 0 (so not "unstable") and the drawdown is
-    # shallow, yet the alpha swings so wildly that its mean is swamped by its own
-    # day-to-day dispersion. Over 3 horses × ~10 days, a horse can clear SPY by
-    # luck; an alpha whose signal is smaller than its noise is exactly that case.
-    # It must NOT read as a clean "edge candidate" — discipline over return.
+    # alpha_pct is CUMULATIVE (return − benchmark since inception). A cumulative
+    # lead that whipsaws 0.1→4.0→0.2→3.5→0.15 means the *daily* active return
+    # swings violently (+3.9, −3.8, +3.3, −3.35): the day-to-day edge is pure
+    # noise around zero. Over 3 horses × ~10 days that is exactly the by-luck
+    # shape; it must NOT read as a clean "edge candidate" — discipline over return.
     v = classify_edge(
         alpha_series=[0.1, 4.0, 0.2, 3.5, 0.15], max_drawdown_pct=-3.0, min_days=5
     )
@@ -93,11 +95,28 @@ def test_classify_flags_within_noise_when_alpha_positive_but_jumpy():
     assert "candidate" not in v.lower()
 
 
-def test_classify_candidate_survives_when_signal_beats_noise():
-    # Consistently positive AND tight: the mean alpha dwarfs its dispersion, so
-    # the within-noise gate must not fire — this is the genuine candidate shape.
+def test_classify_flags_within_noise_when_alpha_is_one_lucky_day_then_coast():
+    # THE dominant luck mode: a horse jumps to a big cumulative lead on a single
+    # day (0.2→7.0) and then merely tracks SPY (7.0, 7.1, 6.9, 7.05). Every level
+    # is positive and the lead looks stable, so a metric reading cumulative
+    # *levels* (mean 5.65 / stdev 3.06 → ratio 1.85) waves it through as a
+    # candidate. But the daily active return is one +6.8 outlier buried in noise:
+    # the strategy showed no repeatable edge after day one. The information ratio
+    # must be computed on daily increments so this reads as within-noise.
     v = classify_edge(
-        alpha_series=[3.0, 3.2, 2.9, 3.1, 3.05], max_drawdown_pct=-3.0, min_days=5
+        alpha_series=[0.2, 7.0, 7.1, 6.9, 7.05], max_drawdown_pct=-3.0, min_days=5
+    )
+    assert "noise" in v.lower()
+    assert "candidate" not in v.lower()
+
+
+def test_classify_candidate_survives_when_signal_beats_noise():
+    # A cumulative alpha that climbs steadily day after day (+0.6, +0.4, +0.7,
+    # +0.4) means a consistently positive *daily* active return whose mean dwarfs
+    # its dispersion — genuine, repeated outperformance. The within-noise gate
+    # must not fire here.
+    v = classify_edge(
+        alpha_series=[1.0, 1.6, 2.0, 2.7, 3.1], max_drawdown_pct=-3.0, min_days=5
     )
     assert "candidate" in v.lower()
     assert "noise" not in v.lower()

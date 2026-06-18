@@ -31,10 +31,10 @@ EDGE_MIN_DAYS = 5
 # flagged as risky rather than a clean candidate (descriptive threshold only).
 DEEP_DRAWDOWN_PCT = -15.0
 
-# Minimum ratio of mean alpha to its own dispersion for a horse to read as a
-# clean candidate. A crude information ratio: if the average daily alpha doesn't
-# clear its day-to-day standard deviation, the "edge" is smaller than its noise —
-# exactly the false positive 3 horses × ~10 days will manufacture by luck.
+# Minimum information ratio (mean ÷ stdev of the *daily* active return) for a
+# horse to read as a clean candidate. If the average day-over-day alpha gain
+# doesn't clear its day-to-day standard deviation, the "edge" is smaller than its
+# noise — exactly the false positive 3 horses × ~10 days will manufacture by luck.
 MIN_ALPHA_SIGNAL_RATIO = 1.0
 
 # The one verdict string that reads as a real go-look signal for the operator.
@@ -43,18 +43,28 @@ EDGE_CANDIDATE_VERDICT = "edge candidate"
 
 
 def _alpha_signal_ratio(real_alpha: List[float]) -> Optional[float]:
-    """Mean alpha divided by its sample stdev (a crude information ratio).
+    """Information ratio of the *daily* active return — mean ÷ stdev of the
+    day-over-day change in alpha.
+
+    ``alpha_pct`` is cumulative (return − benchmark since inception), so the raw
+    series is a path of cumulative *levels*, not daily observations. Reading the
+    ratio off the levels is order-insensitive and fooled by the dominant luck
+    mode: a horse that jumps to a big lead on one day and then merely tracks SPY
+    has a high mean-over-stdev of levels (the lead looks stable) yet showed no
+    repeatable edge after day one. Differencing first turns the path into daily
+    active returns, so a single outlier day is correctly swamped by its own noise.
 
     Returns ``None`` when it can't be computed or is meaningless: fewer than two
-    observations (stdev undefined) or zero dispersion (a perfectly flat positive
-    alpha is *more* convincing, not less — never flag it as noise).
+    daily increments (stdev undefined) or zero dispersion (a perfectly steady
+    daily gain is *more* convincing, not less — never flag it as noise).
     """
-    if len(real_alpha) < 2:
+    deltas = [b - a for a, b in zip(real_alpha, real_alpha[1:])]
+    if len(deltas) < 2:
         return None
-    dispersion = statistics.stdev(real_alpha)
+    dispersion = statistics.stdev(deltas)
     if dispersion == 0:
         return None
-    return statistics.fmean(real_alpha) / dispersion
+    return statistics.fmean(deltas) / dispersion
 
 
 def classify_edge(
