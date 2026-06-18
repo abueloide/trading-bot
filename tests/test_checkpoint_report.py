@@ -370,3 +370,75 @@ def test_no_selection_bias_note_when_no_candidate():
     b = [_snap("2026-06-16", "b", 95.0, -5.0, -2.0), _snap("2026-06-17", "b", 95.0, -5.0, -2.0)]
     out = format_checkpoint(build_checkpoint(a + b, min_days=2), min_days=2)
     assert "selection bias" not in out.lower()
+
+
+# ---- staleness: a dead cron must not read as a fresh checkpoint ----
+# checkpoint_report reads only the persisted curve, with no notion of "today".
+# If the L–V cron stops (Mac asleep, LaunchAgent broken), the curve freezes but
+# the readout would print an old snapshot as if current — and the operator could
+# make the irreversible real-money call on stale data. The staleness note closes
+# that gap. `as_of` is injectable so the clock is testable.
+
+def test_format_warns_when_curve_is_stale():
+    from datetime import date
+
+    # Curve frozen on Thu 06-18; reading the following Tue 06-23 means Fri/Mon/Tue
+    # ran with no snapshot → 3 trading days behind → the cron is genuinely dead.
+    snaps = [
+        _snap("2026-06-17", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-18", "h", 110.0, 10.0, 5.0),
+    ]
+    out = format_checkpoint(
+        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 23)
+    )
+    assert "stale" in out.lower()
+    assert "2026-06-18" in out  # names the last snapshot we actually have
+
+
+def test_format_no_stale_warning_when_curve_is_current():
+    from datetime import date
+
+    snaps = [
+        _snap("2026-06-17", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-18", "h", 110.0, 10.0, 5.0),
+    ]
+    out = format_checkpoint(
+        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 18)
+    )
+    assert "stale" not in out.lower()
+
+
+def test_format_no_stale_warning_within_one_trading_day():
+    from datetime import date
+
+    # Reading Thu 06-18 before that day's 13:00 run: latest mark is Wed 06-17,
+    # one trading day back. That's today's run merely pending, not a dead cron —
+    # warning here would cry wolf every weekday morning.
+    snaps = [
+        _snap("2026-06-16", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-17", "h", 110.0, 10.0, 5.0),
+    ]
+    out = format_checkpoint(
+        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 18)
+    )
+    assert "stale" not in out.lower()
+
+
+def test_stale_warning_ignores_weekend_gap():
+    from datetime import date
+
+    # Curve ends Fri 06-19; reading Mon 06-22. Only Monday is a trading day in
+    # between → 1 trading day → today's run pending over the weekend, not stale.
+    snaps = [
+        _snap("2026-06-18", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-19", "h", 110.0, 10.0, 5.0),
+    ]
+    out = format_checkpoint(
+        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 22)
+    )
+    assert "stale" not in out.lower()
+
+
+def test_stale_note_absent_when_no_curve():
+    out = format_checkpoint([])
+    assert "stale" not in out.lower()

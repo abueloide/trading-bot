@@ -14,6 +14,7 @@ means "worth Luis's attention", never "ship it".
 from __future__ import annotations
 
 import statistics
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -40,6 +41,11 @@ MIN_ALPHA_SIGNAL_RATIO = 1.0
 # The one verdict string that reads as a real go-look signal for the operator.
 # Kept as a constant so the selection-bias note and classify_edge can't drift.
 EDGE_CANDIDATE_VERDICT = "edge candidate"
+
+# A curve whose latest snapshot is this many *trading* days behind "today" reads
+# as stale: the L–V cron likely stopped. One trading day of lag is just today's
+# 13:00 run pending (or a weekend), so the bar is ≥2 to avoid crying wolf daily.
+STALE_TRADING_DAYS = 2
 
 
 def _alpha_signal_ratio(real_alpha: List[float]) -> Optional[float]:
@@ -242,8 +248,65 @@ def _selection_bias_note(rows: List[dict]) -> Optional[str]:
     )
 
 
-def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
-    """Render the consolidated checkpoint table with an honest footer."""
+def _trading_days_after(start: date, end: date) -> int:
+    """Count Mon–Fri days strictly after ``start`` up to and including ``end``.
+
+    Weekends never count, so a checkpoint read on Monday over a Friday curve
+    isn't penalised for the weekend — only genuine missed trading days show up.
+    """
+    if end <= start:
+        return 0
+    count = 0
+    cur = start + timedelta(days=1)
+    while cur <= end:
+        if cur.weekday() < 5:  # Mon=0 … Fri=4
+            count += 1
+        cur += timedelta(days=1)
+    return count
+
+
+def _staleness_note(rows: List[dict], as_of: date) -> Optional[str]:
+    """Warn when the curve's latest snapshot is too many trading days behind today.
+
+    ``checkpoint_report`` reads only the persisted curve and has no clock, so a
+    frozen curve (the L–V cron stopped: Mac asleep, LaunchAgent broken) would
+    print an old snapshot as if current — and the operator could make the
+    irreversible real-money call on stale numbers. One trading day of lag is just
+    today's pending run; ``STALE_TRADING_DAYS`` or more means the cron is behind.
+
+    Returns ``None`` (no note) when the curve is current or its dates are
+    unparseable. Descriptive only.
+    """
+    ends = [r["curve_end"] for r in rows if r.get("curve_end")]
+    if not ends:
+        return None
+    try:
+        last = date.fromisoformat(max(ends))
+    except (TypeError, ValueError):
+        return None
+    elapsed = _trading_days_after(last, as_of)
+    if elapsed < STALE_TRADING_DAYS:
+        return None
+    return (
+        f"⚠ STALE: latest snapshot is {last.isoformat()}, {elapsed} trading days "
+        f"behind today ({as_of.isoformat()}) — the L–V cron may have stopped. The "
+        "numbers below are NOT current; check data/cron.log and "
+        "`launchctl list | grep horserace` before trusting this for any decision."
+    )
+
+
+def format_checkpoint(
+    rows: List[dict],
+    min_days: int = EDGE_MIN_DAYS,
+    as_of: Optional[date] = None,
+) -> str:
+    """Render the consolidated checkpoint table with an honest footer.
+
+    ``as_of`` defaults to today and is injectable so the staleness check is
+    testable without a real clock.
+    """
+    if as_of is None:
+        as_of = date.today()
     if not rows:
         return (
             "no equity curve yet — the checkpoint readout needs at least one "
@@ -275,6 +338,9 @@ def format_checkpoint(rows: List[dict], min_days: int = EDGE_MIN_DAYS) -> str:
         )
 
     lines.append("-" * len(header))
+    stale_note = _staleness_note(rows, as_of)
+    if stale_note:
+        lines.append(stale_note)
     lagging = [
         r for r in rows
         if r.get("n_days", 0) >= min_days and r.get("alpha_days", r.get("n_days", 0)) < min_days
