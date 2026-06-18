@@ -442,3 +442,120 @@ def test_stale_warning_ignores_weekend_gap():
 def test_stale_note_absent_when_no_curve():
     out = format_checkpoint([])
     assert "stale" not in out.lower()
+
+
+# ---- gap-aware verdict: the noise gate differences consecutive alpha values as
+# if one trading day apart. A hole in the *alpha window* (a missed cron day, or a
+# mid-series null from a transient benchmark-fetch failure) collapses a multi-day
+# move into one "daily" increment — masking exactly the single-day luck the gate
+# exists to catch. When the alpha window isn't contiguous the gate is unreliable,
+# so the verdict must not promote to candidate. Same test-verde/prod-roto class,
+# in the component that feeds the irreversible real-money call.
+
+from live.checkpoint_report import _alpha_window_has_gap
+
+
+def test_alpha_window_has_gap_detects_missing_weekday():
+    # Mon, Tue, [skip Wed], Thu — real alpha on each present day.
+    dated = [
+        ("2026-06-15", 1.0),
+        ("2026-06-16", 2.0),
+        ("2026-06-18", 3.0),
+    ]
+    assert _alpha_window_has_gap(dated) is True
+
+
+def test_alpha_window_has_gap_false_on_contiguous():
+    dated = [
+        ("2026-06-15", 1.0),
+        ("2026-06-16", 2.0),
+        ("2026-06-17", 3.0),
+    ]
+    assert _alpha_window_has_gap(dated) is False
+
+
+def test_alpha_window_has_gap_ignores_null_prefix():
+    # Nulls before the benchmark was wired are not part of the alpha window; a
+    # contiguous real-alpha suffix has no gap even though the curve is longer.
+    dated = [
+        ("2026-06-12", None),
+        ("2026-06-15", 1.0),
+        ("2026-06-16", 2.0),
+    ]
+    assert _alpha_window_has_gap(dated) is False
+
+
+def test_alpha_window_has_gap_ignores_weekend():
+    # Fri then Mon is contiguous trading — the weekend is not a gap.
+    dated = [
+        ("2026-06-19", 1.0),  # Friday
+        ("2026-06-22", 2.0),  # Monday
+    ]
+    assert _alpha_window_has_gap(dated) is False
+
+
+def test_alpha_window_has_gap_false_under_two_observations():
+    assert _alpha_window_has_gap([("2026-06-15", 1.0)]) is False
+    assert _alpha_window_has_gap([]) is False
+
+
+def test_alpha_window_has_gap_detects_midseries_null():
+    # A transient benchmark-fetch failure writes a null for one trading day,
+    # leaving real alpha on Mon and Wed but not Tue → the increment Mon→Wed spans
+    # two days, so the gate's "daily" reading is distorted. Treated as a gap.
+    dated = [
+        ("2026-06-15", 1.0),
+        ("2026-06-16", None),
+        ("2026-06-17", 3.0),
+    ]
+    assert _alpha_window_has_gap(dated) is True
+
+
+def test_classify_flags_gap_when_alpha_window_not_contiguous():
+    # An otherwise-clean candidate series, but its alpha window has a hole → the
+    # noise gate can't be trusted, so it must NOT read as a candidate.
+    v = classify_edge(
+        alpha_series=[1.0, 1.6, 2.0, 2.7, 3.1],
+        max_drawdown_pct=-3.0,
+        min_days=5,
+        alpha_window_has_gap=True,
+    )
+    assert "gap" in v.lower()
+    assert "candidate" not in v.lower()
+
+
+def test_classify_no_gap_flag_by_default_keeps_candidate():
+    # Back-compat: without the gap flag the same series still reads as a candidate.
+    v = classify_edge(
+        alpha_series=[1.0, 1.6, 2.0, 2.7, 3.1],
+        max_drawdown_pct=-3.0,
+        min_days=5,
+    )
+    assert "candidate" in v.lower()
+    assert "gap" not in v.lower()
+
+
+def test_classify_gap_does_not_override_more_specific_verdicts():
+    # A gap only blocks promotion to candidate; an already-cautious verdict
+    # (too few alpha days) is not made noisier by it.
+    v = classify_edge(
+        alpha_series=[1.0, 2.0],
+        max_drawdown_pct=-2.0,
+        min_days=5,
+        alpha_window_has_gap=True,
+    )
+    assert "inconclusive" in v.lower()
+
+
+def test_build_flags_gap_in_alpha_window_through_verdict():
+    # Real alpha on 5 days but Wed 06-17 is missing → the winning horse's verdict
+    # reads as gapped, not "edge candidate", agreeing with the ⚠ GAP note.
+    dates = ["2026-06-15", "2026-06-16", "2026-06-18", "2026-06-19", "2026-06-22"]
+    alphas = [1.0, 1.6, 2.0, 2.7, 3.1]
+    snaps = [
+        _snap(d, "momentum_rotation", 25000 + a * 100, a, a)
+        for d, a in zip(dates, alphas)
+    ]
+    rows = build_checkpoint(snaps, min_days=5)
+    assert "gap" in rows[0]["verdict"].lower()
+    assert "candidate" not in rows[0]["verdict"].lower()

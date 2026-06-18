@@ -73,10 +73,46 @@ def _alpha_signal_ratio(real_alpha: List[float]) -> Optional[float]:
     return statistics.fmean(deltas) / dispersion
 
 
+def _alpha_window_has_gap(dated_alpha: List[tuple]) -> bool:
+    """True if the *real* (non-null) alpha observations skip a trading day.
+
+    The noise gate (`_alpha_signal_ratio`) differences consecutive alpha values
+    as if each pair were one trading day apart. If the alpha window has a hole — a
+    missed cron day, or a mid-series null from a transient benchmark-fetch
+    failure — two observations that are really several days apart collapse into a
+    single "daily" increment, masking exactly the single-day luck the gate exists
+    to catch. So when the window isn't contiguous the gate is unreliable and the
+    verdict must not promote to candidate.
+
+    Counts only weekdays (the bot runs L–V), so a Friday→Monday pair is contiguous,
+    not a gap. Returns ``False`` when it can't be judged: fewer than two real
+    observations, or any unparseable date (don't manufacture a gap from bad data).
+    """
+    real_dates: List[date] = []
+    for day, alpha in dated_alpha:
+        if alpha is None:
+            continue
+        try:
+            real_dates.append(date.fromisoformat(day))
+        except (TypeError, ValueError):
+            return False
+    if len(real_dates) < 2:
+        return False
+    real_dates.sort()
+    expected = 0
+    cur = real_dates[0]
+    while cur <= real_dates[-1]:
+        if cur.weekday() < 5:  # Mon=0 … Fri=4
+            expected += 1
+        cur += timedelta(days=1)
+    return expected > len({d.isoformat() for d in real_dates})
+
+
 def classify_edge(
     alpha_series: List[Optional[float]],
     max_drawdown_pct: Optional[float],
     min_days: int = EDGE_MIN_DAYS,
+    alpha_window_has_gap: bool = False,
 ) -> str:
     """Plain-language reading of one horse's alpha *history*. Never a decision.
 
@@ -92,6 +128,9 @@ def classify_edge(
     - **Signal over noise.** Even an all-positive alpha can be a fluke if it
       swings more than it averages. We require the mean alpha to clear its own
       day-to-day dispersion before calling it a clean candidate.
+    - **Contiguity.** The noise gate reads consecutive alphas as daily
+      increments; if the alpha window has a hole (`alpha_window_has_gap`) that
+      reading is distorted, so we refuse to promote to candidate.
     """
     real = [a for a in alpha_series if a is not None]
     if not real:
@@ -104,18 +143,21 @@ def classify_edge(
         return "edge? but unstable (alpha dipped ≤0)"
     if max_drawdown_pct is not None and max_drawdown_pct < DEEP_DRAWDOWN_PCT:
         return "edge? but deep-drawdown risk"
+    if alpha_window_has_gap:
+        return "edge? but alpha curve has gaps"
     ratio = _alpha_signal_ratio(real)
     if ratio is not None and ratio < MIN_ALPHA_SIGNAL_RATIO:
         return "edge? but within noise (alpha < its own swing)"
     return EDGE_CANDIDATE_VERDICT
 
 
-def _alpha_series_by_strategy(snapshots: List[dict]) -> Dict[str, List[Optional[float]]]:
-    """Chronological alpha values per strategy (null entries preserved).
+def _dated_alpha_by_strategy(snapshots: List[dict]) -> Dict[str, List[tuple]]:
+    """Chronological (date, alpha) pairs per strategy (null entries preserved).
 
     Order is by ISO date so ``classify_edge`` can read the latest value and the
-    window's history. Nulls are kept so the count of *real* alpha observations
-    stays honest — they are filtered inside the verdict, not here.
+    window's history, and so the gap check sees the real observation dates. Nulls
+    are kept so the count of *real* alpha observations stays honest — they are
+    filtered inside the verdict and the gap check, not here.
     """
     dated: Dict[str, List[tuple]] = {}
     for rec in snapshots:
@@ -124,7 +166,7 @@ def _alpha_series_by_strategy(snapshots: List[dict]) -> Dict[str, List[Optional[
             continue
         dated.setdefault(strategy, []).append((rec.get("date", ""), rec.get("alpha_pct")))
     return {
-        strategy: [alpha for _, alpha in sorted(rows, key=lambda t: t[0])]
+        strategy: sorted(rows, key=lambda t: t[0])
         for strategy, rows in dated.items()
     }
 
@@ -179,7 +221,7 @@ def build_checkpoint(
     """
     latest = _latest_by_strategy(snapshots)
     risk = compute_risk_metrics(snapshots)
-    alpha_series = _alpha_series_by_strategy(snapshots)
+    dated_alpha = _dated_alpha_by_strategy(snapshots)
     windows = _curve_window_by_strategy(snapshots)
 
     rows: List[dict] = []
@@ -187,8 +229,10 @@ def build_checkpoint(
         m = risk.get(strategy, {})
         max_dd = m.get("max_drawdown_pct")
         n_days = m.get("n_days", 0)
-        series = alpha_series.get(strategy, [])
+        dated = dated_alpha.get(strategy, [])
+        series = [alpha for _, alpha in dated]
         alpha_days = sum(1 for a in series if a is not None)
+        has_gap = _alpha_window_has_gap(dated)
         start, end = windows.get(strategy, (None, None))
         rows.append(
             {
@@ -205,7 +249,9 @@ def build_checkpoint(
                 "gap_days": m.get("gap_days", 0),
                 "curve_start": start,
                 "curve_end": end,
-                "verdict": classify_edge(series, max_dd, min_days),
+                "verdict": classify_edge(
+                    series, max_dd, min_days, alpha_window_has_gap=has_gap
+                ),
             }
         )
 
