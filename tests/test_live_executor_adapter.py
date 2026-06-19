@@ -15,6 +15,13 @@ class FakeExec:
         self.calls.append(("sell", symbol, qty, strategy))
         return {"id": "2"}
 
+    def close_position(self, symbol, reason=""):
+        # MONEY GUARDRAIL: the adapter must NEVER route a strategy SELL here —
+        # in the shared paper account this liquidates the whole net position
+        # and clobbers the other horses' shares. Recorded so a reroute is loud.
+        self.calls.append(("close_position", symbol, reason))
+        return {"id": "danger"}
+
 
 def test_buy_uses_backstop_hold_when_none():
     ex = FakeExec()
@@ -39,3 +46,11 @@ def test_sell_uses_qty_specific_market_sell():
     assert ok is True
     kind, sym, qty, strat = ex.calls[0]
     assert kind == "sell" and sym == "AAPL" and qty == 3.0 and strat == "confirmed_mr"
+
+
+def test_sell_never_routes_through_close_position():
+    """Locks the money guardrail: a strategy SELL must hit place_market_sell,
+    never close_position (which would liquidate the shared net position)."""
+    ex = FakeExec()
+    LiveExecutorAdapter(ex).sell(symbol="AAPL", qty=3.0, price=120.0, strategy="confirmed_mr")
+    assert all(c[0] != "close_position" for c in ex.calls)
