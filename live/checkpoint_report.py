@@ -294,6 +294,33 @@ def _selection_bias_note(rows: List[dict]) -> Optional[str]:
     )
 
 
+def _benchmark_anchor_note(rows: List[dict]) -> Optional[str]:
+    """Show the SPY return that ``alpha%`` is measured against.
+
+    ``alpha% = return − SPY buy&hold``, so the alpha column is only interpretable
+    next to the benchmark it nets out. The same +14% alpha means something very
+    different in a flat market than in a crash — the operator's go/no-go needs to
+    see which regime the horses beat, not just the spread. The cron output prints
+    this line, but the on-demand checkpoint (the actual decision tool) dropped it.
+
+    Uses the latest snapshot's ``benchmark_pct`` (cumulative since inception, like
+    ``return%``). Returns ``None`` when no horse carries a real benchmark — alpha
+    was null before the benchmark was wired, so there's no anchor to show.
+    """
+    dated_bench = [
+        (r.get("curve_end") or "", r["benchmark_pct"])
+        for r in rows
+        if r.get("benchmark_pct") is not None
+    ]
+    if not dated_bench:
+        return None
+    _, latest_bench = max(dated_bench, key=lambda t: t[0])
+    return (
+        f"benchmark SPY buy&hold since inception: {latest_bench:+.2f}%  "
+        "(alpha% = each horse's return − this)"
+    )
+
+
 def _trading_days_after(start: date, end: date) -> int:
     """Count Mon–Fri days strictly after ``start`` up to and including ``end``.
 
@@ -384,6 +411,9 @@ def format_checkpoint(
         )
 
     lines.append("-" * len(header))
+    anchor = _benchmark_anchor_note(rows)
+    if anchor:
+        lines.append(anchor)
     stale_note = _staleness_note(rows, as_of)
     if stale_note:
         lines.append(stale_note)

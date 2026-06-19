@@ -327,6 +327,32 @@ def test_risk_window_note_absent_when_no_curve():
     assert "risk window" not in out.lower()
 
 
+# ---- benchmark anchor: alpha% = return − SPY, so the readout must show the SPY
+# return it is measured against. A +14% alpha in a flat market is a different
+# signal than the same alpha in a crash; without the anchor the operator can't
+# tell which regime the horses beat.
+
+def test_format_shows_benchmark_anchor():
+    snaps = [
+        _snap("2026-06-16", "x", 110.0, 10.0, 8.5, benchmark_pct=1.5),
+        _snap("2026-06-17", "x", 112.0, 12.0, 9.0, benchmark_pct=3.0),
+    ]
+    out = format_checkpoint(build_checkpoint(snaps, min_days=1))
+    assert "benchmark spy" in out.lower()
+    # Latest benchmark return, not an earlier one.
+    assert "3.00" in out
+
+
+def test_benchmark_anchor_absent_when_no_benchmark():
+    # Pre-benchmark snapshots carry null benchmark_pct; no anchor to show.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, None, benchmark_pct=None),
+        _snap("2026-06-16", "x", 101.0, 1.0, None, benchmark_pct=None),
+    ]
+    out = format_checkpoint(build_checkpoint(snaps, min_days=1))
+    assert "benchmark spy" not in out.lower()
+
+
 # ---- selection-bias note: reading the best of N horses inflates the edge ----
 # The PLAN's central statistical risk: with several horses over a short window,
 # the single best one beating SPY is partly a selection effect. classify_edge
