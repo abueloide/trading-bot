@@ -8,6 +8,9 @@ logs/
 *.backup
 *_corrupted*
 
+# local CLI artifacts (OpenClaw image scratch dir)
+.openclaw-cli-images/
+
 # v2 — local data, backtests, caches
 data/
 backtesting/results/
