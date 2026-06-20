@@ -43,9 +43,15 @@ MIN_ALPHA_SIGNAL_RATIO = 1.0
 EDGE_CANDIDATE_VERDICT = "edge candidate"
 
 # A curve whose latest snapshot is this many *trading* days behind "today" reads
-# as stale: the L–V cron likely stopped. One trading day of lag is just today's
-# 13:00 run pending (or a weekend), so the bar is ≥2 to avoid crying wolf daily.
-STALE_TRADING_DAYS = 2
+# as stale: the L–V cron likely stopped. The bar is ≥3 because the snapshot date
+# lags the run by one trading day — each run stamps the latest *completed* daily
+# bar, and at 13:00 today's bar isn't closed, so a Friday run produces a Thursday
+# snapshot. That structural lag means a perfectly healthy curve, read on a weekday
+# MORNING before today's run, already sits two trading days back (yesterday's run
+# stamped the day before yesterday). A bar of 2 would cry wolf every morning and
+# train the operator to ignore the one guard on the irreversible real-money call;
+# ≥3 means a run was genuinely missed (detected the second missed-run day).
+STALE_TRADING_DAYS = 3
 
 
 def _alpha_signal_ratio(real_alpha: List[float]) -> Optional[float]:
@@ -344,8 +350,10 @@ def _staleness_note(rows: List[dict], as_of: date) -> Optional[str]:
     ``checkpoint_report`` reads only the persisted curve and has no clock, so a
     frozen curve (the L–V cron stopped: Mac asleep, LaunchAgent broken) would
     print an old snapshot as if current — and the operator could make the
-    irreversible real-money call on stale numbers. One trading day of lag is just
-    today's pending run; ``STALE_TRADING_DAYS`` or more means the cron is behind.
+    irreversible real-money call on stale numbers. The snapshot date lags the run
+    by one trading day (it stamps the latest *completed* bar), so a healthy curve
+    read on a weekday morning is already two trading days back; only
+    ``STALE_TRADING_DAYS`` (≥3) or more means a run was genuinely missed.
 
     Returns ``None`` (no note) when the curve is current or its dates are
     unparseable. Descriptive only.

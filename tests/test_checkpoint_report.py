@@ -437,12 +437,33 @@ def test_format_no_stale_warning_when_curve_is_current():
 def test_format_no_stale_warning_within_one_trading_day():
     from datetime import date
 
-    # Reading Thu 06-18 before that day's 13:00 run: latest mark is Wed 06-17,
-    # one trading day back. That's today's run merely pending, not a dead cron —
-    # warning here would cry wolf every weekday morning.
+    # Reading Thu 06-18 right after that day's 13:00 run: the run stamps the
+    # snapshot with the latest *completed* bar (Wed 06-17, since today's bar isn't
+    # closed at 13:00), so the freshest curve sits one trading day back. Not stale.
     snaps = [
         _snap("2026-06-16", "h", 110.0, 10.0, 5.0),
         _snap("2026-06-17", "h", 110.0, 10.0, 5.0),
+    ]
+    out = format_checkpoint(
+        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 18)
+    )
+    assert "stale" not in out.lower()
+
+
+def test_format_no_stale_warning_on_healthy_weekday_morning():
+    from datetime import date
+
+    # Production cadence: each run stamps the snapshot with the prior trading day's
+    # close (the latest *completed* daily bar — today's isn't closed at 13:00). So
+    # the freshest a healthy curve can be, read on a weekday MORNING before today's
+    # run, is TWO trading days back: yesterday's run produced a snapshot dated the
+    # day before yesterday. Reading Thu 06-18 morning, the last run (Wed 06-17)
+    # stamped Tue 06-16. That's a healthy cron with today's run pending — warning
+    # here would cry wolf every weekday morning and train the operator to ignore
+    # the one guard protecting the irreversible real-money call.
+    snaps = [
+        _snap("2026-06-15", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-16", "h", 110.0, 10.0, 5.0),
     ]
     out = format_checkpoint(
         build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 18)
