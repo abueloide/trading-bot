@@ -60,8 +60,13 @@ def test_classify_no_edge_when_latest_alpha_not_positive():
 def test_classify_edge_candidate_when_alpha_positive_stable_shallow_dd():
     # Cumulative alpha climbing steadily (+0.7, +0.5, +0.7, +0.5 per day): a
     # consistently positive daily active return, shallow drawdown → clean candidate.
+    # sample_min_days=5 isolates the gate logic from the months-scale sample bar
+    # (tested separately) so this asserts the quality gates promote to candidate.
     v = classify_edge(
-        alpha_series=[1.0, 1.7, 2.2, 2.9, 3.4], max_drawdown_pct=-4.0, min_days=5
+        alpha_series=[1.0, 1.7, 2.2, 2.9, 3.4],
+        max_drawdown_pct=-4.0,
+        min_days=5,
+        sample_min_days=5,
     )
     assert "candidate" in v.lower()
 
@@ -116,10 +121,113 @@ def test_classify_candidate_survives_when_signal_beats_noise():
     # its dispersion — genuine, repeated outperformance. The within-noise gate
     # must not fire here.
     v = classify_edge(
-        alpha_series=[1.0, 1.6, 2.0, 2.7, 3.1], max_drawdown_pct=-3.0, min_days=5
+        alpha_series=[1.0, 1.6, 2.0, 2.7, 3.1],
+        max_drawdown_pct=-3.0,
+        min_days=5,
+        sample_min_days=5,
     )
     assert "candidate" in v.lower()
     assert "noise" not in v.lower()
+
+
+# ---- sample-size bar: the ROADMAP money contract needs ~3–6 months, not weeks ----
+# GATE #1 of docs/ROADMAP-real-money.md is explicit: edge evidence needs ~3–6
+# MONTHS of live paper, and "2 semanas ganando = suerte". So a horse that clears
+# every statistical *quality* gate over a 1–2 week window is plumbing-grade, not
+# edge-grade — it must NOT read as "edge candidate" (the one verdict that signals
+# a real go-look for the irreversible real-money call). This is the gap between the
+# code's verdict semantics and the signed contract; the gate is strictly
+# conservative (it can only downgrade a verdict, never promote).
+
+def test_classify_promising_not_candidate_when_sample_too_short():
+    # Passes every quality gate (positive, stable, signal beats noise, shallow DD)
+    # but over only 5 alpha-days — far below the months-scale contract bar.
+    v = classify_edge(
+        alpha_series=[1.0, 1.7, 2.2, 2.9, 3.4],
+        max_drawdown_pct=-4.0,
+        min_days=5,
+        sample_min_days=63,
+    )
+    assert "candidate" not in v.lower()
+    assert "promising" in v.lower()
+
+
+def test_classify_earns_candidate_only_at_months_scale_sample():
+    # Same clean, steadily-climbing shape, but now over a months-scale sample
+    # (≥ sample_min_days real alpha-days). Only here does it earn "edge candidate".
+    series = [round(1.0 + 0.5 * i, 4) for i in range(63)]  # +0.5/day, no dispersion
+    v = classify_edge(
+        alpha_series=series,
+        max_drawdown_pct=-4.0,
+        min_days=5,
+        sample_min_days=63,
+    )
+    assert "candidate" in v.lower()
+    assert "promising" not in v.lower()
+
+
+def test_edge_sample_min_days_is_months_scale():
+    # The contract floor is ~3 months of paper ≈ 63 trading days. Guard against a
+    # silent drift back toward a weeks-scale bar that would re-open the gap.
+    from live.checkpoint_report import EDGE_SAMPLE_MIN_DAYS
+
+    assert EDGE_SAMPLE_MIN_DAYS >= 60
+
+
+def test_build_uses_months_scale_sample_bar_by_default():
+    # Default build_checkpoint (no sample_min_days override) must apply the contract
+    # bar: a clean 3-day winner reads promising, never "edge candidate".
+    winner = [
+        _snap("2026-06-15", "winner", 110.0, 10.0, 5.0),
+        _snap("2026-06-16", "winner", 110.0, 10.0, 5.0),
+        _snap("2026-06-17", "winner", 110.0, 10.0, 5.0),
+    ]
+    rows = build_checkpoint(winner, min_days=3)
+    assert rows[0]["verdict"] != "edge candidate"
+    assert "promising" in rows[0]["verdict"].lower()
+
+
+def test_format_explains_sample_bar_when_horse_is_promising():
+    # A clean short-sample horse: the footer must explain WHY it reads promising,
+    # tying it to the 3–6 month contract bar so the operator can't mistake a clean
+    # 1–2 week reading for the gate being near.
+    winner = [
+        _snap("2026-06-15", "winner", 110.0, 10.0, 5.0),
+        _snap("2026-06-16", "winner", 110.0, 10.0, 5.0),
+        _snap("2026-06-17", "winner", 110.0, 10.0, 5.0),
+    ]
+    out = format_checkpoint(build_checkpoint(winner, min_days=3), min_days=3)
+    assert "sample bar" in out.lower()
+    assert "3–6 mo" in out or "3-6 mo" in out
+
+
+def test_format_no_sample_bar_note_without_promising_horse():
+    # No horse in the promising tier (all inconclusive) → no sample-bar note.
+    weak = [
+        _snap("2026-06-16", "h", 90.0, -10.0, -5.0),
+        _snap("2026-06-17", "h", 90.0, -10.0, -5.0),
+    ]
+    out = format_checkpoint(build_checkpoint(weak, min_days=2), min_days=2)
+    assert "sample bar" not in out.lower()
+
+
+def test_short_sample_promising_does_not_trip_selection_bias():
+    # Two clean short-sample winners: both read promising, NOT "edge candidate".
+    # The selection-bias note keys off the candidate verdict, so it must stay
+    # silent — there's no over-credited candidate to warn about yet.
+    a = [
+        _snap("2026-06-15", "a", 110.0, 10.0, 5.0),
+        _snap("2026-06-16", "a", 110.0, 10.0, 5.0),
+        _snap("2026-06-17", "a", 110.0, 10.0, 5.0),
+    ]
+    b = [
+        _snap("2026-06-15", "b", 108.0, 8.0, 4.0),
+        _snap("2026-06-16", "b", 108.0, 8.0, 4.0),
+        _snap("2026-06-17", "b", 108.0, 8.0, 4.0),
+    ]
+    out = format_checkpoint(build_checkpoint(a + b, min_days=3), min_days=3)
+    assert "selection bias" not in out.lower()
+    assert "sample bar" in out.lower()
 
 
 # ---- build_checkpoint: latest cut per horse + merged risk + verdict ----
@@ -371,7 +479,11 @@ def test_format_warns_selection_bias_when_candidate_among_several():
         _snap("2026-06-16", "loser", 90.0, -10.0, -5.0),
         _snap("2026-06-17", "loser", 90.0, -10.0, -5.0),
     ]
-    out = format_checkpoint(build_checkpoint(winner + loser, min_days=3), min_days=3)
+    out = format_checkpoint(
+        build_checkpoint(winner + loser, min_days=3, sample_min_days=3),
+        min_days=3,
+        sample_min_days=3,
+    )
     assert "selection bias" in out.lower()
     assert "best of" in out.lower()
     # Names the candidate and stays descriptive (promising, not proven).
@@ -577,6 +689,7 @@ def test_classify_no_gap_flag_by_default_keeps_candidate():
         alpha_series=[1.0, 1.6, 2.0, 2.7, 3.1],
         max_drawdown_pct=-3.0,
         min_days=5,
+        sample_min_days=5,
     )
     assert "candidate" in v.lower()
     assert "gap" not in v.lower()

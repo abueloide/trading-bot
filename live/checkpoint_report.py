@@ -25,8 +25,20 @@ from live.risk_metrics import compute_risk_metrics
 DEFAULT_CURVE_PATH = Path("data/ledgers/equity_curve.jsonl")
 
 # Below this many curve days, any verdict is noise — the clean epoch only starts
-# accumulating mid-June, so a handful of days can't separate edge from luck.
+# accumulating mid-June, so a handful of days can't separate edge from luck. This
+# is the "stop saying inconclusive" bar (enough alpha-days to read the gates), NOT
+# the bar for proven edge — see EDGE_SAMPLE_MIN_DAYS.
 EDGE_MIN_DAYS = 5
+
+# The sample a horse must clear before its verdict may read as a real go-look
+# signal ("edge candidate"). The signed money contract (docs/ROADMAP-real-money.md,
+# GATE #1) is explicit: edge evidence needs ~3–6 MONTHS of live paper, and "2
+# semanas ganando = suerte". So a clean reading over a 1–2 week sample is
+# plumbing-grade, NOT edge-grade — passing the statistical gates over a handful of
+# alpha-days proves the wiring works, not that an edge exists. 63 trading days ≈ 3
+# months is the conservative floor of the contract's range. Below it the best a
+# horse can read is "promising"; only a months-scale sample earns "edge candidate".
+EDGE_SAMPLE_MIN_DAYS = 63
 
 # A positive-alpha horse that got there through a drawdown deeper than this is
 # flagged as risky rather than a clean candidate (descriptive threshold only).
@@ -41,6 +53,13 @@ MIN_ALPHA_SIGNAL_RATIO = 1.0
 # The one verdict string that reads as a real go-look signal for the operator.
 # Kept as a constant so the selection-bias note and classify_edge can't drift.
 EDGE_CANDIDATE_VERDICT = "edge candidate"
+
+# A horse that passes every quality gate but over a sample shorter than
+# EDGE_SAMPLE_MIN_DAYS. It reads as encouraging but deliberately does NOT use the
+# "edge candidate" words: per the contract a short clean window is plumbing-grade,
+# not proof. Kept distinct so the selection-bias note (which keys off the candidate
+# verdict) never over-credits a months-away sample.
+PROMISING_VERDICT = "promising — plumbing-grade (need ~3–6 mo for edge)"
 
 # A curve whose latest snapshot is this many *trading* days behind "today" reads
 # as stale: the L–V cron likely stopped. The bar is ≥3 because the snapshot date
@@ -119,6 +138,7 @@ def classify_edge(
     max_drawdown_pct: Optional[float],
     min_days: int = EDGE_MIN_DAYS,
     alpha_window_has_gap: bool = False,
+    sample_min_days: int = EDGE_SAMPLE_MIN_DAYS,
 ) -> str:
     """Plain-language reading of one horse's alpha *history*. Never a decision.
 
@@ -137,6 +157,10 @@ def classify_edge(
     - **Contiguity.** The noise gate reads consecutive alphas as daily
       increments; if the alpha window has a hole (`alpha_window_has_gap`) that
       reading is distorted, so we refuse to promote to candidate.
+    - **Sample size.** Passing every gate over a 1–2 week window proves the
+      plumbing works, not that an edge exists. The money contract (ROADMAP GATE
+      #1) needs ~3–6 months of paper and calls 2 winning weeks luck, so below
+      ``sample_min_days`` the verdict reads "promising", never "edge candidate".
     """
     real = [a for a in alpha_series if a is not None]
     if not real:
@@ -154,6 +178,8 @@ def classify_edge(
     ratio = _alpha_signal_ratio(real)
     if ratio is not None and ratio < MIN_ALPHA_SIGNAL_RATIO:
         return "edge? but within noise (alpha < its own swing)"
+    if len(real) < sample_min_days:
+        return PROMISING_VERDICT
     return EDGE_CANDIDATE_VERDICT
 
 
@@ -219,6 +245,7 @@ def _latest_by_strategy(snapshots: List[dict]) -> Dict[str, dict]:
 def build_checkpoint(
     snapshots: List[dict],
     min_days: int = EDGE_MIN_DAYS,
+    sample_min_days: int = EDGE_SAMPLE_MIN_DAYS,
 ) -> List[dict]:
     """One row per horse: latest return/alpha + curve risk + a verdict.
 
@@ -256,7 +283,11 @@ def build_checkpoint(
                 "curve_start": start,
                 "curve_end": end,
                 "verdict": classify_edge(
-                    series, max_dd, min_days, alpha_window_has_gap=has_gap
+                    series,
+                    max_dd,
+                    min_days,
+                    alpha_window_has_gap=has_gap,
+                    sample_min_days=sample_min_days,
                 ),
             }
         )
@@ -376,10 +407,34 @@ def _staleness_note(rows: List[dict], as_of: date) -> Optional[str]:
     )
 
 
+def _sample_bar_note(rows: List[dict], sample_min_days: int) -> Optional[str]:
+    """Explain why a clean horse reads "promising" instead of "edge candidate".
+
+    The verdict column already carries the short string, but the operator needs
+    the *why* tied to the signed contract: edge evidence needs ~3–6 months of live
+    paper (ROADMAP GATE #1), and 2 winning weeks is luck. Without this, a reader
+    who waited out the original "2-week window" could mistake a clean short-sample
+    reading for the gate being near. Fires only when a horse is in the promising
+    tier; descriptive only.
+    """
+    promising = [r for r in rows if r.get("verdict") == PROMISING_VERDICT]
+    if not promising:
+        return None
+    best_alpha_days = max(r.get("alpha_days", 0) for r in promising)
+    return (
+        f"ℹ sample bar: '{PROMISING_VERDICT}' means every quality gate passed but "
+        f"over too short a sample (best is {best_alpha_days} alpha-days; edge needs "
+        f"≥{sample_min_days}, ~3–6 mo of live paper per ROADMAP GATE #1). A clean "
+        "1–2 week reading proves the plumbing, NOT an edge — 2 winning weeks is luck. "
+        "It only earns 'edge candidate' after a months-scale sample."
+    )
+
+
 def format_checkpoint(
     rows: List[dict],
     min_days: int = EDGE_MIN_DAYS,
     as_of: Optional[date] = None,
+    sample_min_days: int = EDGE_SAMPLE_MIN_DAYS,
 ) -> str:
     """Render the consolidated checkpoint table with an honest footer.
 
@@ -457,6 +512,9 @@ def format_checkpoint(
             "cron run leaves holes; vol/max_dd treat a multi-day jump as one day, "
             "so read those numbers with caution and check data/cron.log."
         )
+    sample_note = _sample_bar_note(rows, sample_min_days)
+    if sample_note:
+        lines.append(sample_note)
     selection_note = _selection_bias_note(rows)
     if selection_note:
         lines.append(selection_note)
