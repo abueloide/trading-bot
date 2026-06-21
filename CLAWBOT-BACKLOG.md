@@ -37,6 +37,11 @@ Regla: **no se abre mercado nuevo hasta que las acciones muestren aunque sea un 
 - **Crypto = candidato razonable.** Plumbing a medias: `crypto_client.py` (Binance, soporta testnet/paper, misma interfaz que Alpaca) PERO no cableado al orquestador vivo. Bloqueos: (1) llaves Binance en cuarentena → necesita creds **testnet** nuevas, NUNCA las de mainnet; (2) 24/7 rompe el modelo de cron diario L-V; (3) extender el framework horse-race+alpha a crypto. Encaja en el mismo rig si se hace bien.
 - **Forex = NO.** Bróker nuevo desde cero, apalancamiento = riesgo de reventar cuenta, stats de retail las peores. Fuera de alcance.
 
+## Herramientas evaluadas — NO re-evaluar
+
+Catálogo de la flota: `~/Documents/Sistema Luisfer/_sistema/herramientas-disponibles.md`.
+- **TradingAgents** (TauricResearch, arxiv 2412.20138) — **EVALUADO 2026-06-21 → IGNORAR para el motor.** Enjambre LLM que debate trades: ensucia el edge determinista (no reproducible, lookahead bias, $0.30-0.50/ticker/corrida). Su única pieza buena (Risk Manager que veta) ya la tienes hard-coded: guard paper, sizing vs cash, venta por qty, gate de edge-candidate. El patrón debate-y-veta sí vale para cierres Prudential (vive en el catálogo de la flota), NO aquí. Cerrado: no reabrir.
+
 ## NO romper
 
 Guard: solo corre si `ALPACA_BASE_URL=paper-api.alpaca.markets`. Sizing contra cash (no equity). Vender por qty específica, NUNCA `close_position`.
