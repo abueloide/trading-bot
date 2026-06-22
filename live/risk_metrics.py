@@ -17,6 +17,8 @@ import statistics
 from datetime import date, timedelta
 from typing import Dict, List, Optional
 
+from live.market_calendar import is_trading_day
+
 
 def _usable_rows(records: List[dict]) -> List[dict]:
     """Chronological usable snapshot rows for one strategy.
@@ -35,10 +37,11 @@ def _equity_series(records: List[dict]) -> List[float]:
 
 
 def _missing_weekdays(dates: List[str]) -> int:
-    """Count weekday (Mon–Fri) slots missing between first and last snapshot.
+    """Count NYSE trading-day slots missing between first and last snapshot.
 
-    The bot runs L–V, so a contiguous curve has one mark per trading weekday.
-    Weekends are never counted; a skipped Tuesday is. A non-zero result means
+    The bot runs L–V, so a contiguous curve has one mark per trading day.
+    Weekends and market holidays (e.g. Juneteenth) are never counted; a skipped
+    Tuesday is. A non-zero result means
     the equity curve has holes — vol/drawdown computed over it treats a
     multi-day jump as one day's move, so the numbers must be read with caution.
     Unparseable dates are ignored rather than crashing the readout.
@@ -55,7 +58,7 @@ def _missing_weekdays(dates: List[str]) -> int:
     expected = 0
     cur = parsed[0]
     while cur <= parsed[-1]:
-        if cur.weekday() < 5:  # Mon=0 … Fri=4
+        if is_trading_day(cur):  # weekday and not a NYSE holiday
             expected += 1
         cur += timedelta(days=1)
     present = len({d.isoformat() for d in parsed})

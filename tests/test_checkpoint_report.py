@@ -520,17 +520,18 @@ def test_no_selection_bias_note_when_no_candidate():
 def test_format_warns_when_curve_is_stale():
     from datetime import date
 
-    # Curve frozen on Thu 06-18; reading the following Tue 06-23 means Fri/Mon/Tue
+    # Curve frozen on Tue 06-23; reading the following Fri 06-26 means Wed/Thu/Fri
     # ran with no snapshot → 3 trading days behind → the cron is genuinely dead.
+    # Holiday-free window (avoids Juneteenth 06-19) so the count is unambiguous.
     snaps = [
-        _snap("2026-06-17", "h", 110.0, 10.0, 5.0),
-        _snap("2026-06-18", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-22", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-23", "h", 110.0, 10.0, 5.0),
     ]
     out = format_checkpoint(
-        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 23)
+        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 26)
     )
     assert "stale" in out.lower()
-    assert "2026-06-18" in out  # names the last snapshot we actually have
+    assert "2026-06-23" in out  # names the last snapshot we actually have
 
 
 def test_format_no_stale_warning_when_curve_is_current():
@@ -708,9 +709,10 @@ def test_classify_gap_does_not_override_more_specific_verdicts():
 
 
 def test_build_flags_gap_in_alpha_window_through_verdict():
-    # Real alpha on 5 days but Wed 06-17 is missing → the winning horse's verdict
+    # Real alpha on 5 days but Wed 06-24 is missing → the winning horse's verdict
     # reads as gapped, not "edge candidate", agreeing with the ⚠ GAP note.
-    dates = ["2026-06-15", "2026-06-16", "2026-06-18", "2026-06-19", "2026-06-22"]
+    # Holiday-free window (avoids Juneteenth 06-19) so the hole is the only gap.
+    dates = ["2026-06-22", "2026-06-23", "2026-06-25", "2026-06-26", "2026-06-29"]
     alphas = [1.0, 1.6, 2.0, 2.7, 3.1]
     snaps = [
         _snap(d, "momentum_rotation", 25000 + a * 100, a, a)

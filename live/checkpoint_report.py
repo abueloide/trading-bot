@@ -18,6 +18,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from live.market_calendar import is_trading_day
+
 from live.equity_snapshot import load_snapshots
 from live.risk_metrics import compute_risk_metrics
 
@@ -109,8 +111,9 @@ def _alpha_window_has_gap(dated_alpha: List[tuple]) -> bool:
     to catch. So when the window isn't contiguous the gate is unreliable and the
     verdict must not promote to candidate.
 
-    Counts only weekdays (the bot runs L–V), so a Friday→Monday pair is contiguous,
-    not a gap. Returns ``False`` when it can't be judged: fewer than two real
+    Counts only NYSE trading days, so a Friday→Monday pair is contiguous, and a
+    weekday holiday (e.g. Juneteenth) is not mistaken for a gap. Returns ``False``
+    when it can't be judged: fewer than two real
     observations, or any unparseable date (don't manufacture a gap from bad data).
     """
     real_dates: List[date] = []
@@ -127,7 +130,7 @@ def _alpha_window_has_gap(dated_alpha: List[tuple]) -> bool:
     expected = 0
     cur = real_dates[0]
     while cur <= real_dates[-1]:
-        if cur.weekday() < 5:  # Mon=0 … Fri=4
+        if is_trading_day(cur):  # weekday and not a NYSE holiday
             expected += 1
         cur += timedelta(days=1)
     return expected > len({d.isoformat() for d in real_dates})
@@ -359,17 +362,18 @@ def _benchmark_anchor_note(rows: List[dict]) -> Optional[str]:
 
 
 def _trading_days_after(start: date, end: date) -> int:
-    """Count Mon–Fri days strictly after ``start`` up to and including ``end``.
+    """Count NYSE trading days strictly after ``start`` up to and including ``end``.
 
-    Weekends never count, so a checkpoint read on Monday over a Friday curve
-    isn't penalised for the weekend — only genuine missed trading days show up.
+    Weekends and market holidays never count, so a checkpoint read on Monday over
+    a Friday curve isn't penalised for the weekend — only genuine missed trading
+    days show up.
     """
     if end <= start:
         return 0
     count = 0
     cur = start + timedelta(days=1)
     while cur <= end:
-        if cur.weekday() < 5:  # Mon=0 … Fri=4
+        if is_trading_day(cur):  # weekday and not a NYSE holiday
             count += 1
         cur += timedelta(days=1)
     return count

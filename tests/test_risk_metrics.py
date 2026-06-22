@@ -125,12 +125,24 @@ def test_skipped_weekday_is_counted_as_a_gap():
 
 def test_multiple_skipped_weekdays_accumulate():
     # Mon→Fri with Tue/Wed/Thu all missing → 3 missing trading days.
+    # Holiday-free week (06-19 is Juneteenth, so this week avoids it).
     snaps = [
-        _snap("2026-06-15", "x", 100.0),  # Mon
-        _snap("2026-06-19", "x", 102.0),  # Fri
+        _snap("2026-06-22", "x", 100.0),  # Mon
+        _snap("2026-06-26", "x", 102.0),  # Fri
     ]
     assert compute_risk_metrics(snaps)["x"]["gap_days"] == 3
 
 
 def test_single_day_has_no_gap():
     assert compute_risk_metrics([_snap("2026-06-15", "x", 100.0)])["x"]["gap_days"] == 0
+
+
+def test_market_holiday_is_not_a_gap():
+    # Thu 06-18 → Mon 06-22 spans Juneteenth (Fri 06-19, NYSE closed) + weekend.
+    # The curve is contiguous in *trading* days, so no gap. This is the exact
+    # false positive prod showed on 2026-06-22 before holiday awareness landed.
+    snaps = [
+        _snap("2026-06-18", "x", 100.0),  # Thu
+        _snap("2026-06-22", "x", 101.0),  # Mon (06-19 Juneteenth, no trading)
+    ]
+    assert compute_risk_metrics(snaps)["x"]["gap_days"] == 0
