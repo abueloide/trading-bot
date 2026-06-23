@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from live.checkpoint_report import (
@@ -304,6 +306,42 @@ def test_verdict_flags_unstable_alpha_through_build():
     ]
     row = build_checkpoint(snaps, min_days=5)[0]
     assert "unstable" in row["verdict"].lower()
+
+
+def test_verdict_ignores_intraday_today_bar():
+    # 4 settled alpha-days + today's intraday provisional bar (dated as_of, a
+    # trading day). The ⚠ INTRADAY note warns the human that today's row is a
+    # mid-session partial that "typically shifts by the close" (06-22's +19.19%
+    # alpha fell to +11.60% by the next close). The verdict — which feeds the
+    # irreversible money call — must NOT consume it: counting it would cross the
+    # ≥5 alpha-day gate on a bar that hasn't settled.
+    settled = [
+        _snap("2026-06-15", "x", 100.0, 0.0, 1.0),
+        _snap("2026-06-16", "x", 101.0, 1.0, 1.2),
+        _snap("2026-06-17", "x", 102.0, 2.0, 1.4),
+        _snap("2026-06-18", "x", 103.0, 3.0, 1.6),
+    ]
+    intraday = _snap("2026-06-23", "x", 120.0, 20.0, 19.0)  # mid-session spike
+    row = build_checkpoint(
+        settled + [intraday], min_days=5, as_of=date(2026, 6, 23)
+    )[0]
+    assert row["alpha_days"] == 4  # intraday bar excluded from the verdict count
+    assert "inconclusive" in row["verdict"].lower()  # gate not crossed on a partial
+
+
+def test_verdict_counts_latest_when_not_intraday():
+    # Healthy cadence: the latest snapshot lags ≥1 trading day behind as_of
+    # (today's bar isn't closed at the 13:00 run), so the last row is a settled
+    # close and MUST count toward the verdict.
+    settled = [
+        _snap("2026-06-15", "x", 100.0, 0.0, 1.0),
+        _snap("2026-06-16", "x", 101.0, 1.0, 1.2),
+        _snap("2026-06-17", "x", 102.0, 2.0, 1.4),
+        _snap("2026-06-18", "x", 103.0, 3.0, 1.6),
+        _snap("2026-06-22", "x", 104.0, 4.0, 1.8),
+    ]
+    row = build_checkpoint(settled, min_days=5, as_of=date(2026, 6, 23))[0]
+    assert row["alpha_days"] == 5  # every settled close counted
 
 
 def test_format_table_shows_alpha_days_distinct_from_curve_days():
@@ -753,6 +791,8 @@ def test_build_flags_gap_in_alpha_window_through_verdict():
         _snap(d, "momentum_rotation", 25000 + a * 100, a, a)
         for d, a in zip(dates, alphas)
     ]
-    rows = build_checkpoint(snaps, min_days=5)
+    # Read the window as_of a settled day after it closes, so the intraday guard
+    # (which drops a snapshot dated today) leaves all five alpha-days intact.
+    rows = build_checkpoint(snaps, min_days=5, as_of=date(2026, 6, 30))
     assert "gap" in rows[0]["verdict"].lower()
     assert "candidate" not in rows[0]["verdict"].lower()

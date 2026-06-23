@@ -245,16 +245,42 @@ def _latest_by_strategy(snapshots: List[dict]) -> Dict[str, dict]:
     return latest
 
 
+def _settled_alpha(dated: List[tuple], as_of: date) -> List[tuple]:
+    """Drop a trailing snapshot dated *today* — it's an unsettled intraday bar.
+
+    The 13:00 cron stamps the snapshot with the latest bar, which on a trading
+    day is today's *mid-session* partial, not a settled close (06-22's +19.19%
+    alpha fell to +11.60% by the next close). ``_intraday_snapshot_note`` warns
+    the human; the verdict must likewise refuse to count a provisional alpha, or
+    it could cross the alpha-day gate on a value that shifts at the close.
+    Healthy cadence leaves the latest snapshot ≥1 trading day back, so this only
+    fires on the same-day intraday signature. Reader-side guard, independent of
+    the source-side fix in PR #5.
+    """
+    if not is_trading_day(as_of):
+        return dated
+    today = as_of.isoformat()
+    return [(d, a) for (d, a) in dated if d != today]
+
+
 def build_checkpoint(
     snapshots: List[dict],
     min_days: int = EDGE_MIN_DAYS,
     sample_min_days: int = EDGE_SAMPLE_MIN_DAYS,
+    as_of: Optional[date] = None,
 ) -> List[dict]:
     """One row per horse: latest return/alpha + curve risk + a verdict.
 
     Sorted by alpha descending (horses with no alpha sink to the bottom), then
     by equity, so the most market-beating horse reads first.
+
+    ``as_of`` defaults to today and is injectable so the verdict can exclude an
+    unsettled intraday bar (a snapshot dated today). The display row still shows
+    that latest partial alongside the ⚠ INTRADAY note; only the verdict and the
+    alpha-day count read settled closes.
     """
+    if as_of is None:
+        as_of = date.today()
     latest = _latest_by_strategy(snapshots)
     risk = compute_risk_metrics(snapshots)
     dated_alpha = _dated_alpha_by_strategy(snapshots)
@@ -265,7 +291,7 @@ def build_checkpoint(
         m = risk.get(strategy, {})
         max_dd = m.get("max_drawdown_pct")
         n_days = m.get("n_days", 0)
-        dated = dated_alpha.get(strategy, [])
+        dated = _settled_alpha(dated_alpha.get(strategy, []), as_of)
         series = [alpha for _, alpha in dated]
         alpha_days = sum(1 for a in series if a is not None)
         has_gap = _alpha_window_has_gap(dated)
