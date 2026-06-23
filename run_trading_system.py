@@ -24,7 +24,7 @@ from live.ledger_store import load_ledgers, save_ledgers
 from live.risk_metrics import compute_risk_metrics, format_risk_table
 from live.live_executor_adapter import LiveExecutorAdapter
 from live.orchestrator import LOOKBACK_BARS, Orchestrator, StrategyConfig
-from live.yfinance_bars import CachedBars, YFinanceBars
+from live.yfinance_bars import CachedBars, YFinanceBars, drop_in_progress_bars
 from live.horse_race_report import build_report, format_table
 from stock_universe import sp500_symbols
 
@@ -142,6 +142,9 @@ def main() -> int:
 
     logger.info("fetching bars for %d symbols (batch)...", len(FETCH_SYMBOLS))
     snapshot = YFinanceBars().get_bars_batch(FETCH_SYMBOLS, LOOKBACK_BARS)
+    # The 13:00 CST cron runs mid-session, so yfinance's trailing bar is today's
+    # in-progress (partial) print. Trade and snapshot on settled closes only.
+    snapshot = drop_in_progress_bars(snapshot, date.today())
     if not snapshot:
         raise SystemExit("No bars returned for the universe; aborting (no trades).")
     cached = CachedBars(snapshot)

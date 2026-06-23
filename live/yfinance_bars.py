@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -25,6 +26,32 @@ def _normalize(raw: Optional[pd.DataFrame], lookback: int) -> Optional[pd.DataFr
     if df.empty:
         return None
     return df.tail(lookback)
+
+
+def drop_in_progress_bars(
+    snapshot: Dict[str, pd.DataFrame], today: date
+) -> Dict[str, pd.DataFrame]:
+    """Drop any trailing bar dated ``today`` or later.
+
+    A daily run during market hours gets an in-progress (partial) bar for the
+    live session: yfinance stamps it with today's date but the close has not
+    settled. Strategies, the report, and the equity snapshot must act on settled
+    closes only — a mid-session print taints return/alpha (e.g. the 2026-06-22
+    snapshot stamped momentum at a media-session price). Symbols left empty after
+    the drop are omitted (callers already guard on missing symbols).
+
+    ponytail: drops today's bar unconditionally; a rare after-close manual run
+    loses one day of recency (the next run recovers it), which a daily-close
+    strategy never needs. Upgrade path if intraday runs ever matter: gate on a
+    market-close clock instead of the calendar day.
+    """
+    out: Dict[str, pd.DataFrame] = {}
+    for sym, df in snapshot.items():
+        if df is not None and len(df) and df.index[-1].date() >= today:
+            df = df.iloc[:-1]
+        if df is not None and len(df):
+            out[sym] = df
+    return out
 
 
 class YFinanceBars:
