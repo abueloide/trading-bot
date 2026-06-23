@@ -563,6 +563,41 @@ def test_format_no_stale_warning_within_one_trading_day():
     assert "stale" not in out.lower()
 
 
+def test_format_warns_when_latest_snapshot_is_dated_today():
+    from datetime import date
+
+    # The 13:00 cron stamps df.index[-1]. A healthy curve NEVER stamps today (the
+    # day's bar isn't closed at 13:00, so it lags ≥1 trading day). A snapshot dated
+    # today is the intraday-partial-bar taint (06-22/06-23): an unsettled price that
+    # typically moves by the close. Read on that same trading day, the latest row
+    # must be flagged provisional before any go/no-go.
+    snaps = [
+        _snap("2026-06-22", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-23", "h", 120.0, 20.0, 5.0),  # dated as_of below
+    ]
+    out = format_checkpoint(
+        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 23)
+    )
+    assert "intraday" in out.lower()
+    assert "2026-06-23" in out
+
+
+def test_format_no_intraday_warning_on_healthy_lagged_curve():
+    from datetime import date
+
+    # Healthy cadence: last snapshot lags the run by ≥1 trading day, so it is never
+    # dated today. Reading Tue 06-23 with the freshest snapshot at Mon 06-22 → no
+    # intraday warning (firing here would cry wolf on every settled curve).
+    snaps = [
+        _snap("2026-06-18", "h", 110.0, 10.0, 5.0),
+        _snap("2026-06-22", "h", 110.0, 10.0, 5.0),
+    ]
+    out = format_checkpoint(
+        build_checkpoint(snaps, min_days=2), min_days=2, as_of=date(2026, 6, 23)
+    )
+    assert "intraday" not in out.lower()
+
+
 def test_format_no_stale_warning_on_healthy_weekday_morning():
     from datetime import date
 

@@ -411,6 +411,39 @@ def _staleness_note(rows: List[dict], as_of: date) -> Optional[str]:
     )
 
 
+def _intraday_snapshot_note(rows: List[dict], as_of: date) -> Optional[str]:
+    """Warn when the latest snapshot is dated today — recorded on an unsettled bar.
+
+    The 13:00 CST cron stamps each snapshot with ``df.index[-1]`` (the latest bar
+    yfinance returns). Mid-session that bar has NOT closed, so a snapshot dated
+    *today* reflects an intraday price, not a settled close — its return/alpha/vol
+    are provisional and usually move by the close (06-22's +19.19% momentum alpha
+    collapsed to +11.60% the next day, once a real close landed). A healthy curve
+    never stamps today: it lags ≥1 trading day behind the run (today's bar isn't
+    closed at 13:00), so ``last == today`` is the intraday-partial-bar signature.
+    The source fix lives in PR #5 (drops in-progress bars before they're recorded);
+    this is the independent reader-side warning so the operator never weighs an
+    unsettled row in the irreversible go/no-go. Descriptive only.
+    """
+    ends = [r["curve_end"] for r in rows if r.get("curve_end")]
+    if not ends:
+        return None
+    try:
+        last = date.fromisoformat(max(ends))
+    except (TypeError, ValueError):
+        return None
+    if last != as_of or not is_trading_day(as_of):
+        return None
+    return (
+        f"⚠ INTRADAY: latest snapshot ({last.isoformat()}) is dated today and was "
+        "recorded by the 13:00 cron on an unsettled intraday bar, NOT a settled "
+        "close — its return%/alpha%/vol% are provisional and typically shift by the "
+        "close (06-22's +19.19% alpha fell to +11.60% the next day). Don't weigh the "
+        "latest row in any decision until a settled close supersedes it. Source fix "
+        "pending in PR #5."
+    )
+
+
 def _sample_bar_note(rows: List[dict], sample_min_days: int) -> Optional[str]:
     """Explain why a clean horse reads "promising" instead of "edge candidate".
 
@@ -484,6 +517,9 @@ def format_checkpoint(
     stale_note = _staleness_note(rows, as_of)
     if stale_note:
         lines.append(stale_note)
+    intraday_note = _intraday_snapshot_note(rows, as_of)
+    if intraday_note:
+        lines.append(intraday_note)
     lagging = [
         r for r in rows
         if r.get("n_days", 0) >= min_days and r.get("alpha_days", r.get("n_days", 0)) < min_days
