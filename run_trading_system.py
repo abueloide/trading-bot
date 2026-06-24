@@ -168,6 +168,20 @@ def main() -> int:
     logger.info("ledger state saved to %s", STATE_PATH)
 
     marks = {sym: float(df["close"].iloc[-1]) for sym, df in snapshot.items() if len(df)}
+    # No silent cost-basis fallback: VirtualPortfolio.to_portfolio_state marks a
+    # held name with no fresh price at its entry cost (avg_entry), which fabricates
+    # that position's value — equity then looks calmer than reality on exactly the
+    # days data is flaky, with zero trace. Coverage is ~full today (503-504/504),
+    # but shout the day it isn't so a tainted equity/return is never silent.
+    held_unmarked = sorted(
+        {sym for vp in portfolios for sym in vp.to_dict()["lots"] if sym not in marks}
+    )
+    if held_unmarked:
+        logger.warning(
+            "%d HELD symbols missing a fresh mark -> valued at entry cost (equity "
+            "understated/tainted this run): %s",
+            len(held_unmarked), ", ".join(held_unmarked),
+        )
     benchmark, benchmark_pct = resolve_benchmark(snapshot)
     rows = build_report(portfolios, marks=marks, benchmark_pct=benchmark_pct)
     print(format_table(rows, benchmark=benchmark))
