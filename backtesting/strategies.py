@@ -109,19 +109,26 @@ def strategy_confirmed_mr(
     spy_close: Optional[pd.Series] = None,
     rsi_buy: int = 15,
     rsi_sell: int = 65,
+    sma_short: int = 50,
     sma_long: int = 200,
 ) -> pd.DataFrame:
     """Strategy B — Confirmed Mean Reversion.
 
-    Entry: RSI(2) < 15 AND close > open (bullish reversal) AND SPY > 200d MA.
+    Entry: RSI(2) < 15 AND close > open (bullish reversal) AND SPY > 200d MA
+           AND symbol's 50d MA > 200d MA (per-name uptrend filter).
     Exit: RSI(2) > 65 (engine enforces 7-day time exit).
+
+    The per-name uptrend filter (the same one rsi_mr already had) is what stops
+    this horse catching falling knives — the 06-25 audit traced its −9% bleed to
+    buying oversold names that kept trending down with no trend gate.
     """
     sig = _empty_signals(df)
-    if df.empty or len(df) < 30:
+    if df.empty or len(df) < sma_long:
         return sig
 
     r = rsi(df["close"], period=2)
     bullish_candle = df["close"] > df["open"]
+    uptrend = sma(df["close"], sma_short) > sma(df["close"], sma_long)
 
     if spy_close is not None and len(spy_close) >= sma_long:
         spy_aligned = spy_close.reindex(df.index).ffill()
@@ -130,7 +137,7 @@ def strategy_confirmed_mr(
     else:
         spy_ok = pd.Series(True, index=df.index)
 
-    sig["entry"] = (r < rsi_buy) & bullish_candle & spy_ok
+    sig["entry"] = (r < rsi_buy) & bullish_candle & uptrend & spy_ok
     sig["exit"] = r > rsi_sell
     return sig
 

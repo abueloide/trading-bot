@@ -14,7 +14,7 @@ ranked candidate lists. It is pure (no I/O, no broker) and offline-testable.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -47,11 +47,36 @@ def momentum_scores(bars_by_symbol: Dict[str, pd.DataFrame]) -> Dict[str, float]
     return scores
 
 
-def momentum_top(bars_by_symbol: Dict[str, pd.DataFrame], n: int) -> List[str]:
-    """Top-`n` symbols by momentum score, positive scores only (descending)."""
+def momentum_top(
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    n: int,
+    *,
+    sector_of: Optional[Callable[[str], str]] = None,
+    max_per_sector: Optional[int] = None,
+) -> List[str]:
+    """Top-`n` symbols by momentum score, positive scores only (descending).
+
+    When `sector_of` and `max_per_sector` are given, enforce a per-sector cap
+    while filling the basket: walk names strongest-first, skip any whose sector
+    already holds `max_per_sector` picks. Without a cap, behaviour is unchanged.
+    This stops the basket from collapsing into one hot sector (e.g. 12/15 semis)
+    — the difference between an edge and a leveraged single-theme bet.
+    """
     scores = momentum_scores(bars_by_symbol)
-    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    return [sym for sym, score in ranked if score > 0][:n]
+    ranked = [s for s, score in sorted(scores.items(), key=lambda kv: kv[1], reverse=True) if score > 0]
+    if sector_of is None or max_per_sector is None:
+        return ranked[:n]
+    picked: List[str] = []
+    per_sector: Dict[str, int] = {}
+    for sym in ranked:
+        sec = sector_of(sym)
+        if per_sector.get(sec, 0) >= max_per_sector:
+            continue
+        picked.append(sym)
+        per_sector[sec] = per_sector.get(sec, 0) + 1
+        if len(picked) >= n:
+            break
+    return picked
 
 
 def oversold_candidates(

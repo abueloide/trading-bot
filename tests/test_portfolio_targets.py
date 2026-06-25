@@ -42,6 +42,23 @@ def _oversold_reversal(n: int = 240) -> pd.DataFrame:
     return df
 
 
+def _downtrend_oversold(n: int = 240) -> pd.DataFrame:
+    # Long decline (50d MA below 200d MA) ending in an oversold dip — the kind of
+    # falling knife confirmed_mr must now reject via its per-name uptrend filter.
+    base = [200.0 - i * 0.5 for i in range(n - 5)]
+    drop = [base[-1] * f for f in (0.96, 0.92, 0.88, 0.85, 0.82)]
+    df = _bars(base + drop)
+    last_close = float(df["close"].iloc[-1])
+    df.iloc[-1, df.columns.get_loc("open")] = last_close * 0.99  # bullish candle
+    return df
+
+
+def test_confirmed_mr_rejects_oversold_downtrend():
+    # Oversold but in a downtrend → uptrend filter blocks the entry.
+    bars = {"FALLING": _downtrend_oversold()}
+    assert oversold_candidates("confirmed_mr", bars) == []
+
+
 def test_momentum_scores_rank_strong_above_weak():
     bars = {"FAST": _steady(1.0), "SLOW": _steady(0.1)}
     scores = momentum_scores(bars)
@@ -58,6 +75,24 @@ def test_momentum_top_takes_n_strongest_positive():
     top = momentum_top(bars, n=2)
     assert top == ["A", "B"]
     assert "D" not in momentum_top(bars, n=10)  # negative score excluded
+
+
+def test_momentum_top_caps_per_sector():
+    # 4 strong tech names + 1 weaker energy name. Without a cap the basket is
+    # all-tech; with max_per_sector=2 it must leave room for the energy name.
+    bars = {
+        "T1": _steady(1.0), "T2": _steady(0.9), "T3": _steady(0.8), "T4": _steady(0.7),
+        "E1": _steady(0.3),
+    }
+    sectors = {"T1": "Tech", "T2": "Tech", "T3": "Tech", "T4": "Tech", "E1": "Energy"}
+    top = momentum_top(bars, n=3, sector_of=sectors.get, max_per_sector=2)
+    assert top == ["T1", "T2", "E1"]  # T3/T4 skipped: Tech cap hit
+
+
+def test_momentum_top_cap_noop_without_both_args():
+    bars = {"A": _steady(1.0), "B": _steady(0.5)}
+    # sector_of without max_per_sector → unchanged behaviour
+    assert momentum_top(bars, n=2, sector_of=lambda s: "X") == ["A", "B"]
 
 
 def test_momentum_ignores_too_short_series():

@@ -30,6 +30,7 @@ from live.ports import ExecutorPort
 from live.strategy_runner import StrategyRunner
 from live.virtual_portfolio import VirtualPortfolio
 from risk_manager import RiskManager
+from sp500_constituents import SP500_CONSTITUENTS
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,16 @@ _FALLBACK_SLOTS = 5
 # When a momentum horse runs a news overlay, rank a deeper pool so vetoed names
 # can be replaced by the next-best survivors instead of shrinking the basket.
 NEWS_POOL_FACTOR = 3
+
+# Cap momentum picks per GICS sector so the basket can't collapse into one hot
+# theme (the 06-25 audit found 12/15 holdings were "Technology"/semis). 3 leaves
+# room for a real momentum tilt without becoming a single-sector leveraged bet.
+MAX_PER_SECTOR = 3
+_SECTOR_OF = {d["symbol"]: d["sector"] for d in SP500_CONSTITUENTS}
+
+
+def _sector_of(symbol: str) -> str:
+    return _SECTOR_OF.get(symbol, "Unknown")
 
 
 @dataclass
@@ -135,8 +146,8 @@ class Orchestrator:
         no-op and this degrades to plain momentum top-n.
         """
         if not self._news_overlay.get(name):
-            return momentum_top(local, n)
-        pool = momentum_top(local, n * NEWS_POOL_FACTOR)
+            return momentum_top(local, n, sector_of=_sector_of, max_per_sector=MAX_PER_SECTOR)
+        pool = momentum_top(local, n * NEWS_POOL_FACTOR, sector_of=_sector_of, max_per_sector=MAX_PER_SECTOR)
         sentiment = self._news_fetcher(pool)
         basket = apply_news_overlay(pool, sentiment, n)
         vetoed = len(pool[:n]) - len(set(basket) & set(pool[:n]))
