@@ -168,6 +168,32 @@ def strategy_momentum_rotation(
     return sig
 
 
+def strategy_donchian_breakout(
+    df: pd.DataFrame, entry_lookback: int = 20, exit_lookback: int = 10,
+) -> pd.DataFrame:
+    """Strategy D — Donchian channel breakout (trend following).
+
+    Entry: close breaks ABOVE the highest high of the prior ``entry_lookback``
+           bars (a 20-day high breakout).
+    Exit:  close breaks BELOW the lowest low of the prior ``exit_lookback`` bars
+           (a 10-day low). No time stop — the channel itself carries the trend.
+
+    Genuinely distinct from the other horses: momentum buys what already ran for
+    6 months, mean-reversion buys what fell, this buys the instant price makes a
+    new local high and rides until it makes a new local low. Channels use the
+    PRIOR window (``.shift(1)``) so the break is measured against bars before
+    today, never against today's own high/low.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < entry_lookback + 1:
+        return sig
+    upper = df["high"].rolling(entry_lookback).max().shift(1)
+    lower = df["low"].rolling(exit_lookback).min().shift(1)
+    sig["entry"] = df["close"] > upper
+    sig["exit"] = df["close"] < lower
+    return sig
+
+
 def strategy_ema_crossover(
     df: pd.DataFrame, fast: int = 10, slow: int = 50,
 ) -> pd.DataFrame:
@@ -226,6 +252,12 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "type": "momentum",
         "max_hold_days": None,
         "description": "Momentum rotation + AlphaVantage news-sentiment veto",
+    },
+    "donchian_breakout": {
+        "fn": strategy_donchian_breakout,
+        "type": "breakout",
+        "max_hold_days": None,  # exits on a 10-day-low break, not on time
+        "description": "Donchian 20/10 channel breakout (trend following)",
     },
     "ema_crossover": {
         "fn": strategy_ema_crossover,

@@ -53,9 +53,11 @@ def test_resolve_benchmark_warns_when_all_bars_predate_inception(caplog):
 
 
 def test_resolve_benchmark_defaults_to_race_inception():
-    # Called without an explicit inception, it uses the module constant.
+    # Called without an explicit inception, it uses the module constant. Anchor
+    # the bars to RACE_INCEPTION so this survives future epoch resets.
+    inception = rts.RACE_INCEPTION
     snapshot = {rts.BENCHMARK_SYMBOL: _spy(
-        ["2026-06-05", "2026-06-12"], [600.0, 660.0],
+        [inception, inception + pd.Timedelta(days=7)], [600.0, 660.0],
     )}
     bm, _ = rts.resolve_benchmark(snapshot)
     assert bm is not None

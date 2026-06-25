@@ -110,6 +110,44 @@ def oversold_candidates(
     return out
 
 
+def breakout_candidates(
+    strategy_name: str,
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    exclude: Optional[set] = None,
+    entry_lookback: int = 20,
+) -> List[Tuple[str, float, float]]:
+    """Symbols whose last bar fires this breakout strategy's entry, ranked by
+    breakout strength (how far close cleared the prior N-day high), strongest first.
+
+    Returns (symbol, strength, last_price) tuples — same shape as
+    ``oversold_candidates`` so the orchestrator fills slots identically. When
+    more names break out than there are open slots, the ones that cleared the
+    channel most decisively win. ``entry_lookback`` must match the strategy's
+    entry window (20, the registry default).
+    """
+    exclude = exclude or set()
+    fn = STRATEGY_REGISTRY[strategy_name]["fn"]
+    out: List[Tuple[str, float, float]] = []
+    for sym, df in bars_by_symbol.items():
+        if sym in exclude or not _usable(df):
+            continue
+        if "high" not in df.columns or len(df) < entry_lookback + 1:
+            continue
+        try:
+            sig = fn(df)
+        except Exception:
+            continue
+        if len(sig) == 0 or not bool(sig["entry"].iloc[-1]):
+            continue
+        prior_high = float(df["high"].iloc[-(entry_lookback + 1):-1].max())
+        price = float(df["close"].iloc[-1])
+        if prior_high <= 0 or price <= 0:
+            continue
+        out.append((sym, price / prior_high - 1.0, price))
+    out.sort(key=lambda t: t[1], reverse=True)
+    return out
+
+
 def exit_signals(
     strategy_name: str,
     bars_by_symbol: Dict[str, pd.DataFrame],
