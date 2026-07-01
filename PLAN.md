@@ -67,3 +67,14 @@
 > Scouting de Luis (carrusel SYNTAIX AI). Exploratorio — NO derailar la ventana de paper en curso. **Cambio de arquitectura → spike en rama + PR para Luis, NUNCA auto-ship.**
 
 - [~] **TradingAgents** (`github.com/TauricResearch/TradingAgents`, arXiv 2412.20138) — `gate portado, falta cablear (PR)`. Repo clonado en `~/dev/_tradingagents-spike` (deps instaladas, `TradingAgentsGraph` importa; correrlo end-to-end pide key LLM/Finnhub). **Patrón robado y portado:** `live/risk_gate.py` — debate multi-perspectiva (conservador/neutral/agresivo) que veta encima de `evaluate_entry`, determinista y testeable (`tests/test_risk_gate.py`, 5/5 verde). NO cableado al orchestrator todavía: enchufar después de `evaluate_entry` y antes de `executor.buy` es el PR (cambio de arquitectura → para Luis). Robar la arquitectura: analistas (fundamental/sentiment/news/technical) → **Risk Manager que vetea ANTES de ejecutar** → executor. Hoy el bot decide y ejecuta sin gate de riesgo separado; portar ese Risk Manager como gate previo a toda orden alinea con el norte ("riesgo y disciplina por encima de todo"). NO migrar a su stack; portar el patrón. Substrato natural si se materializa: **LangGraph** (máquina de estados resiliente > debate). Spike acotado: leer el paper + diseñar el gate como módulo puro testeable, PR para Luis. NO tocar el horse-race en curso hasta cerrar su ventana de alpha.
+
+---
+
+## 🧰 Herramientas OSS candidatas (carruseles IG · 30-jun-2026)
+Fuente completa: `Sistema Luisfer/_sistema/tools-oss-candidatas.md`.
+
+**Honestidad:** ninguno de los 6 carruseles trae una tool específica de trading. Solo aplican transversales:
+- **Metabase** — dashboards de resultados del paper horse-race (sobre `results.csv` / la DB).
+- **Coolify** — self-host del loop si algún día sale de tu Mac (mata rate-limits de cloud).
+
+No forzar adopción aquí; el norte sigue siendo *edge real en paper*.
