@@ -181,7 +181,7 @@ class Orchestrator:
                 continue
             price = _last_price(local.get(sym))
             if price is not None:
-                self._do_buy(runner, vp, sym, price, weight_dollars)
+                self._do_buy(runner, vp, sym, price, weight_dollars, local)
 
     # ---------------------------------------------- slot-filling strategies
 
@@ -207,14 +207,24 @@ class Orchestrator:
         weight_dollars = vp.starting_cash / self._slots[runner.name]
         candidates = candidate_fn(runner.name, local, exclude=held)
         for sym, _rank, price in candidates[:slots]:
-            self._do_buy(runner, vp, sym, price, weight_dollars)
+            self._do_buy(runner, vp, sym, price, weight_dollars, local)
 
     # ------------------------------------------------------------ execution
 
-    def _do_buy(self, runner, vp, symbol: str, price: float, proposed_dollars: float) -> None:
+    def _do_buy(self, runner, vp, symbol: str, price: float, proposed_dollars: float, local) -> None:
         if vp.qty(symbol) > 0:
             return  # no pyramiding in v1
-        state = vp.to_portfolio_state(marks={symbol: price})
+        # Mark every current holding to market so risk sizing sees mark-to-market
+        # equity, not a cost-basis mix — the avg_entry fallback in
+        # to_portfolio_state otherwise hides all unrealized P&L from max_position_pct
+        # and the cash-reserve math (audit #6).
+        marks = {symbol: price}
+        for s in self._symbols[runner.name]:
+            if s != symbol and vp.qty(s) > 0:
+                p = _last_price(local.get(s))
+                if p is not None:
+                    marks[s] = p
+        state = vp.to_portfolio_state(marks=marks)
         # Never propose more than the slice's free cash can fund: with open
         # positions, equity > cash, and an equity-based size could pass risk but
         # fail record_buy after the broker already filled (ledger/reality drift).
