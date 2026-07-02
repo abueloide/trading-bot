@@ -16,6 +16,9 @@ import os
 from collections import deque
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+from live.market_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -49,22 +52,28 @@ except ImportError:
     get_trade_journal = None
 
 
-# US market hours expressed in UTC (NYSE 9:30 - 16:00 ET; ignores DST nuance —
-# in production use exchange calendars). Approximate to ET == UTC-5/-4.
+# NYSE regular session 9:30-16:00 ET. ``ZoneInfo`` tracks DST automatically, so
+# a summer run no longer maps to the wrong wall-clock window (the old UTC-5
+# approximation ran the gate 10:30-17:00 real ET from March-November).
 _MARKET_OPEN_ET = time(9, 30)
 _MARKET_CLOSE_ET = time(16, 0)
+_ET = ZoneInfo("America/New_York")
 
 
 def _now_et() -> datetime:
-    # Approximation: use UTC-5 (EST) — DST ignored deliberately to keep this
-    # dependency-free. Replace with `pandas_market_calendars` for production.
-    return datetime.utcnow() - timedelta(hours=5)
+    return datetime.now(_ET)
 
 
 def is_market_open(now: Optional[datetime] = None) -> bool:
     now = now or _now_et()
-    if now.weekday() > 4:
+    # Reject full-day NYSE closures (weekends + holidays), not just weekends —
+    # a DAY order submitted on a holiday queues to the next open and fills far
+    # from the close the ledger recorded (silent fill drift).
+    if not is_trading_day(now.date()):
         return False
+    # ponytail: half-day early closes (13:00 ET) still read as open until 16:00
+    # here; the 13:00-CST/14:00-ET cron would submit into a closed book on those
+    # ~3 days/yr. Add early-close times to market_calendar if that bites.
     return _MARKET_OPEN_ET <= now.time() < _MARKET_CLOSE_ET
 
 
