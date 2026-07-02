@@ -72,17 +72,6 @@ ALPACA_CONFIG: Dict[str, Any] = {
 }
 
 
-def get_api_credentials() -> Dict[str, str]:
-    """Compatibility shim: legacy code calls this for Binance creds."""
-    return {
-        "ALPACA_API_KEY": ALPACA_API_KEY,
-        "ALPACA_SECRET_KEY": ALPACA_SECRET_KEY,
-        # Aliases retained for any v1 code path not yet migrated.
-        "BINANCE_API": ALPACA_API_KEY,
-        "BINANCE_SECRET": ALPACA_SECRET_KEY,
-    }
-
-
 # =============================================================================
 # DATA COLLECTION CONFIGURATION
 # =============================================================================
