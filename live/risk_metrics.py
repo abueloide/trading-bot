@@ -36,14 +36,16 @@ def _equity_series(records: List[dict]) -> List[float]:
     return [float(r["equity"]) for r in _usable_rows(records)]
 
 
-def _missing_weekdays(dates: List[str]) -> int:
-    """Count NYSE trading-day slots missing between first and last snapshot.
+def _missing_weekday_dates(dates: List[str]) -> List[str]:
+    """ISO dates of NYSE trading-day slots missing between first and last snapshot.
 
     The bot runs L–V, so a contiguous curve has one mark per trading day.
     Weekends and market holidays (e.g. Juneteenth) are never counted; a skipped
-    Tuesday is. A non-zero result means
-    the equity curve has holes — vol/drawdown computed over it treats a
-    multi-day jump as one day's move, so the numbers must be read with caution.
+    Tuesday is. A non-empty result means the equity curve has holes — vol/drawdown
+    computed over it treats a multi-day jump as one day's move, so the numbers must
+    be read with caution. Returning the actual missing dates (not just a count)
+    lets the reader tell a known, permanent hole (e.g. the 2026-06-25 reset day)
+    from a fresh one, so a stale one-off gap can't cry wolf on every checkpoint.
     Unparseable dates are ignored rather than crashing the readout.
     """
     parsed: List[date] = []
@@ -53,16 +55,22 @@ def _missing_weekdays(dates: List[str]) -> int:
         except (TypeError, ValueError):
             continue
     if len(parsed) < 2:
-        return 0
+        return []
     parsed.sort()
-    expected = 0
+    present = {d.isoformat() for d in parsed}
+    missing: List[str] = []
     cur = parsed[0]
     while cur <= parsed[-1]:
-        if is_trading_day(cur):  # weekday and not a NYSE holiday
-            expected += 1
+        iso = cur.isoformat()
+        if is_trading_day(cur) and iso not in present:  # weekday, not a NYSE holiday, no mark
+            missing.append(iso)
         cur += timedelta(days=1)
-    present = len({d.isoformat() for d in parsed})
-    return max(0, expected - present)
+    return missing
+
+
+def _missing_weekdays(dates: List[str]) -> int:
+    """Count of NYSE trading-day slots missing between first and last snapshot."""
+    return len(_missing_weekday_dates(dates))
 
 
 def _max_drawdown_pct(series: List[float]) -> float:
@@ -100,11 +108,13 @@ def compute_risk_metrics(snapshots: List[dict]) -> Dict[str, dict]:
         if not rows:
             continue
         series = [float(r["equity"]) for r in rows]
+        gap_dates = _missing_weekday_dates([r.get("date", "") for r in rows])
         metrics[strategy] = {
             "max_drawdown_pct": _max_drawdown_pct(series),
             "volatility_pct": _volatility_pct(series),
             "n_days": len(series),
-            "gap_days": _missing_weekdays([r.get("date", "") for r in rows]),
+            "gap_days": len(gap_dates),
+            "gap_dates": gap_dates,
         }
     return metrics
 

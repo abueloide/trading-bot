@@ -130,7 +130,18 @@ def test_multiple_skipped_weekdays_accumulate():
         _snap("2026-06-22", "x", 100.0),  # Mon
         _snap("2026-06-26", "x", 102.0),  # Fri
     ]
-    assert compute_risk_metrics(snaps)["x"]["gap_days"] == 3
+    m = compute_risk_metrics(snaps)["x"]
+    assert m["gap_days"] == 3
+    # The actual missing trading days are surfaced, in order — Tue/Wed/Thu.
+    assert m["gap_dates"] == ["2026-06-23", "2026-06-24", "2026-06-25"]
+
+
+def test_contiguous_curve_has_no_gap_dates():
+    snaps = [
+        _snap("2026-06-15", "x", 100.0),  # Mon
+        _snap("2026-06-16", "x", 101.0),  # Tue
+    ]
+    assert compute_risk_metrics(snaps)["x"]["gap_dates"] == []
 
 
 def test_single_day_has_no_gap():

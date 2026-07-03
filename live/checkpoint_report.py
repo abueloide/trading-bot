@@ -309,6 +309,7 @@ def build_checkpoint(
                 "n_days": n_days,
                 "alpha_days": alpha_days,
                 "gap_days": m.get("gap_days", 0),
+                "gap_dates": m.get("gap_dates", []),
                 "curve_start": start,
                 "curve_end": end,
                 "verdict": classify_edge(
@@ -574,10 +575,15 @@ def format_checkpoint(
     gappy = [r for r in rows if r.get("gap_days", 0) > 0]
     if gappy:
         detail = ", ".join(f"{r['strategy']} ({r['gap_days']})" for r in gappy)
+        # Surface the actual missing date(s), pooled across horses, so a reader can
+        # tell a known permanent hole (e.g. the 2026-06-25 reset day) from a fresh
+        # missed run without spelunking data/cron.log on every checkpoint.
+        missing_days = sorted({d for r in gappy for d in r.get("gap_dates", [])})
+        when = f" on {', '.join(missing_days)}" if missing_days else ""
         lines.append(
-            f"⚠ GAP: equity curve is missing trading day(s) — {detail}. A skipped "
-            "cron run leaves holes; vol/max_dd treat a multi-day jump as one day, "
-            "so read those numbers with caution and check data/cron.log."
+            f"⚠ GAP: equity curve is missing trading day(s){when} — {detail}. A "
+            "skipped cron run leaves holes; vol/max_dd treat a multi-day jump as one "
+            "day, so read those numbers with caution and check data/cron.log."
         )
     sample_note = _sample_bar_note(rows, sample_min_days)
     if sample_note:
