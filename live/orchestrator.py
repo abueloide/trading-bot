@@ -21,6 +21,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 import pandas as pd
 
 from live.news_overlay import apply_news_overlay, fetch_sentiment
+from live.risk_gate import debate_entry
 from live.portfolio_targets import (
     breakout_candidates,
     exit_signals,
@@ -244,6 +245,17 @@ class Orchestrator:
             logger.info("entry denied %s/%s: %s", runner.name, symbol, decision.reason)
             return
         qty = decision.adjusted_qty
+        # Second-opinion risk debate (TradingAgents pattern): a multi-lens gate
+        # over the ALREADY-sized order (qty * price) that can only HARDEN, never
+        # relax, evaluate_entry — vetoes a trade the sizing let through.
+        gate = debate_entry(
+            proposed_size_usd=qty * price,
+            portfolio=state,
+            base_decision=decision,
+        )
+        if not gate.approved:
+            logger.info("entry gated %s/%s: %s", runner.name, symbol, gate.summary)
+            return
         if self._executor.buy(
             symbol=symbol, qty=qty, price=price, strategy=runner.name,
             strategy_type=runner.strategy_type, max_hold_days=runner.max_hold_days,
