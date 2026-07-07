@@ -61,8 +61,10 @@ class RecordingExecutor:
         return True
 
 
+# Relaja base Y gate: estos tests aíslan ranking/news de momentum, no el gating.
 _HORSE_RISK = {"max_position_pct": 1.0, "min_cash_reserve_pct": 0.0,
-               "max_open_positions": 50, "max_sector_exposure_pct": 1.0}
+               "max_open_positions": 50, "max_sector_exposure_pct": 1.0,
+               "gate_position_cap": 1.0, "gate_sector_cap": 1.0}
 
 
 def test_momentum_buys_top_n_by_rank_not_alphabetical():
