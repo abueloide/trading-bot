@@ -194,6 +194,37 @@ def strategy_donchian_breakout(
     return sig
 
 
+def strategy_trend_pullback(
+    df: pd.DataFrame, fast: int = 20, slow: int = 50,
+) -> pd.DataFrame:
+    """Strategy E — buy resolved pullbacks inside an intermediate uptrend.
+
+    Thesis: the two dead mean-reversion horses (rsi_mr, confirmed_mr) *fought*
+    the trend — they bought extreme oversold (RSI2<10/15) with no requirement
+    that the pullback had turned back up, so they caught falling knives. This
+    buys *with* the trend instead: only when the intermediate trend is up
+    (SMA20 > SMA50) AND price has just reclaimed the fast line from below (a
+    shallow dip that resolved upward), then rides until the trend itself breaks
+    (close < SMA50). No extreme-oversold trigger, no counter-trend bet.
+
+    Regime it expects to work in: intermediate/persistent UPTRENDS (the exact
+    walk-forward OOS regime here, ~2024). It should sit out sustained
+    downtrends because the SMA20>SMA50 gate is false there. Short lookbacks
+    (20/50) so the signal is valid inside a 6-month OOS window — unlike a 200d
+    regime line, which never accumulates enough bars per walk-forward window.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < slow + 1:
+        return sig
+    fast_ma = sma(df["close"], fast)
+    slow_ma = sma(df["close"], slow)
+    uptrend = fast_ma > slow_ma
+    reclaim = (df["close"] > fast_ma) & (df["close"].shift(1) <= fast_ma.shift(1))
+    sig["entry"] = reclaim & uptrend
+    sig["exit"] = df["close"] < slow_ma
+    return sig
+
+
 def strategy_ema_crossover(
     df: pd.DataFrame, fast: int = 10, slow: int = 50,
 ) -> pd.DataFrame:
@@ -252,6 +283,12 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "type": "momentum",
         "max_hold_days": None,
         "description": "Momentum rotation + AlphaVantage news-sentiment veto",
+    },
+    "trend_pullback": {
+        "fn": strategy_trend_pullback,
+        "type": "breakout",  # signal exit (close < SMA50), no time stop
+        "max_hold_days": None,
+        "description": "Buy resolved pullbacks in an SMA20>SMA50 uptrend",
     },
     "donchian_breakout": {
         "fn": strategy_donchian_breakout,
