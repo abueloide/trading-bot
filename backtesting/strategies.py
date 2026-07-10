@@ -225,6 +225,44 @@ def strategy_trend_pullback(
     return sig
 
 
+def strategy_pullback_ride(
+    df: pd.DataFrame, fast: int = 20, slow: int = 50, trail_lookback: int = 10,
+) -> pd.DataFrame:
+    """Strategy F — buy the contained dip, ride with a trailing-low stop.
+
+    Thesis: trend_pullback (Field 02, idea 1) died for two named reasons in its
+    postmortem: it entered *late* (bought only after price reclaimed SMA20, i.e.
+    after the bounce already happened) and exited *early* (bailed on every touch
+    of SMA50, cutting winners). Donchian tests the opposite entry (buy new highs,
+    ride to an N-day low) and also had no edge. The untested cell is: buy the dip
+    *itself* — while price is still under the fast line but held above the slow
+    line inside an uptrend (weakness within strength, earlier than a reclaim) —
+    and ride with a trailing-low stop instead of a fixed SMA50 exit, so winners
+    run until a real trend break rather than every shallow pullback.
+
+    Entry: SMA20 > SMA50 (uptrend) AND close <= SMA20 (in the dip, not extended)
+           AND close > SMA50 (dip is contained above the slow line, not a knife).
+    Exit:  close < lowest low of the prior ``trail_lookback`` bars (trend break),
+           not the first SMA50 kiss.
+
+    Regime it expects to work in: persistent uptrends that pull back shallowly to
+    the fast MA. It sits out downtrends (SMA20>SMA50 false) and hard selloffs
+    (close>SMA50 false). Short lookbacks (20/50/10) so every gate is valid inside
+    the ~6-month walk-forward OOS window.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < slow + 1:
+        return sig
+    fast_ma = sma(df["close"], fast)
+    slow_ma = sma(df["close"], slow)
+    uptrend = fast_ma > slow_ma
+    in_dip = (df["close"] <= fast_ma) & (df["close"] > slow_ma)
+    trail_stop = df["low"].rolling(trail_lookback).min().shift(1)
+    sig["entry"] = uptrend & in_dip
+    sig["exit"] = df["close"] < trail_stop
+    return sig
+
+
 def strategy_ema_crossover(
     df: pd.DataFrame, fast: int = 10, slow: int = 50,
 ) -> pd.DataFrame:
@@ -289,6 +327,12 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "type": "breakout",  # signal exit (close < SMA50), no time stop
         "max_hold_days": None,
         "description": "Buy resolved pullbacks in an SMA20>SMA50 uptrend",
+    },
+    "pullback_ride": {
+        "fn": strategy_pullback_ride,
+        "type": "breakout",  # signal exit (trailing-low break), no time stop
+        "max_hold_days": None,
+        "description": "Buy contained dip in SMA20>SMA50 uptrend, ride 10-day trailing-low stop",
     },
     "donchian_breakout": {
         "fn": strategy_donchian_breakout,
