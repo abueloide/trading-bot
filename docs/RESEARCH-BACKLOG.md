@@ -9,17 +9,6 @@ Estados: PENDIENTE · EN CURSO · HECHO (con veredicto).
 
 ## Prioridad
 
-### H1 — Momentum en cripto  · PENDIENTE
-Tesis: el momentum cross-sectional funciona mejor en activos jóvenes y volátiles
-(cripto) que en índices maduros. El carrusel de @raycfu lo afirma; un smoke test
-in-sample (2026-07-12) dio BTC-USD momentum +33%, Sharpe 0.77, +4.56 vs SPY —
-único con excess positivo. Probar EN SERIO.
-- Estrategia: `momentum_rotation` (ya existe) sobre universo cripto.
-- Símbolos (≥4 para el gate): `BTC-USD,ETH-USD,SOL-USD,LTC-USD,BNB-USD,XRP-USD`.
-- `--data-source yfinance`, walk-forward on. Gate normal.
-- Ojo: cripto es 7 días/semana; validar que el engine no se rompa con calendario
-  no-bursátil (si sesga, documentarlo — es un hallazgo, no un bug a esconder).
-
 ### H2 — Trend-following en commodities  · PENDIENTE
 Tesis: el trend-following captura las tendencias largas de materias primas mejor
 que en equities (donde el mean-reversion domina). Carrusel: "trend on gold & oil".
@@ -35,4 +24,10 @@ la composición no las salva. Marcar según resultados de H1/H2.
 
 ## Hecho
 
-_(vacío — el loop mueve items aquí con su veredicto)_
+### H1 — Momentum en cripto  · HECHO · FAIL ❌ (2026-07-13)
+Muerta en backtest, 0 edge OOS. Gate FAIL (median_excess −69.12 / breadth 0.0 /
+median_sharpe −0.06 / min_trades 3). El smoke test in-sample (+33% BTC) era
+overfit puro: no sobrevivió walk-forward (BTC OOS −2.04%, Sharpe −0.21). La
+estrategia se sienta en cash durante el cripto-invierno y nunca captura el bull;
+único positivo (XRP +14.7%) es idiosincrático, breadth 0/6. Engine NO se rompió
+con calendario 7d/semana. No desplegada. Postmortem: `docs/postmortems/2026-07-13-crypto-momentum-h1.md`.
