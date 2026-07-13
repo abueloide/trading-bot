@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import statistics as st
 import sys
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 # Gate thresholds. Tuned to veto all 4 of the 2026-07 field on OOS backtest.
 # ponytail: constants here, move to config only if a second consumer appears.
@@ -50,6 +50,40 @@ def evaluate(per_symbol: Dict[str, dict]) -> Dict[str, object]:
     passed = all(ok for _, ok in checks.values())
     failed = [k for k, (_, ok) in checks.items() if not ok]
     return {"passed": passed, "reason": "clean" if passed else "failed: " + ", ".join(failed), "checks": checks}
+
+
+def annotate_validation(
+    result: Dict[str, object],
+    validation: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, object]:
+    """Optionally attach statistical-validation stats to an evaluate() verdict.
+
+    Non-breaking / additive only: never changes `passed`, `reason`, or `checks`
+    — it just stacks a `validation` block on top for extra context on the
+    strategy that already cleared (or failed) the gate above.
+
+    `validation` is caller-supplied: a dict keyed by symbol with the dict
+    returned by backtesting.validation.monte_carlo_test() / bootstrap_sharpe_ci()
+    (e.g. {"AAPL": {"p_value_sharpe": 0.01, ...}, ...}). This function does no
+    I/O and makes no run-dir assumptions — the caller is responsible for
+    loading each symbol's equity/trades artifacts and calling those pure
+    functions; this just aggregates whatever it's given. If `validation` is
+    omitted, `result` is returned unchanged, so existing call sites (and
+    tests) are unaffected.
+    """
+    if not validation:
+        return result
+
+    p_values = [v["p_value_sharpe"] for v in validation.values() if "p_value_sharpe" in v]
+    prob_positives = [v["prob_positive"] for v in validation.values() if "prob_positive" in v]
+
+    annotated = dict(result)
+    annotated["validation"] = {
+        "symbols": sorted(validation.keys()),
+        "median_p_value_sharpe": round(st.median(p_values), 4) if p_values else None,
+        "median_prob_positive": round(st.median(prob_positives), 4) if prob_positives else None,
+    }
+    return annotated
 
 
 def _load(path: str) -> Dict[str, dict]:
