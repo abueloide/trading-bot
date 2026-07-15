@@ -36,5 +36,12 @@ def load_ledgers(path) -> Dict[str, dict]:
         with open(path) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.error("ledger state unreadable at %s: %s — starting fresh", path, e)
-        return {}
+        # Fail hard: a corrupt-but-PRESENT state file must NOT silently reset all
+        # ledgers to starting cash while Alpaca still holds every position — the
+        # next cycle would re-buy full slices (doubled broker positions) and wipe
+        # the race history. A fresh start must be explicit (scripts/reset_race.py).
+        raise SystemExit(
+            f"FATAL: ledger state exists but is unreadable at {path}: {e}. "
+            "Refusing to start fresh (would double broker positions). Restore the "
+            "file from backup, or run scripts/reset_race.py to reset intentionally."
+        )

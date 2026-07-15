@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from live.ledger_store import save_ledgers, load_ledgers
 from live.virtual_portfolio import VirtualPortfolio
 
@@ -23,3 +25,12 @@ def test_save_creates_parent_dirs(tmp_path):
     path = tmp_path / "nested" / "dir" / "state.json"
     save_ledgers([VirtualPortfolio("s", 1.0)], path)
     assert path.exists()
+
+
+def test_corrupt_state_fails_hard_not_silent_reset(tmp_path):
+    # A present-but-unreadable state file must abort the run, NOT reset ledgers
+    # to starting cash (which would double broker positions). Audit #1.
+    path = tmp_path / "state.json"
+    path.write_text("{not valid json")
+    with pytest.raises(SystemExit):
+        load_ledgers(path)

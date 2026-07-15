@@ -37,18 +37,24 @@ def build_report(
 
 
 def format_table(rows: List[dict], benchmark: Optional[dict] = None) -> str:
-    has_alpha = bool(rows) and "alpha_pct" in rows[0]
+    # Per-row check, not rows[0]: a heterogeneous set (one horse missing a
+    # benchmark) must not KeyError or silently misalign the column (audit #12).
+    has_alpha = bool(rows) and all("alpha_pct" in r for r in rows)
     header = f"{'strategy':<20}{'equity':>12}{'return%':>10}{'realized':>12}{'pos':>5}"
     if has_alpha:
         header += f"{'alpha%':>9}"
     lines = [header, "-" * len(header)]
     for r in rows:
+        # Force the sign on every signed column so gain/loss reads without colour
+        # — the bot layer's 🟢/🔴 is invisible to red-green colourblind eyes, so
+        # the +/− must carry the meaning on its own (audit #3). Thousands sep on
+        # equity; cents are noise at $25k (audit #10).
         line = (
-            f"{r['strategy']:<20}{r['equity']:>12.2f}{r['return_pct']:>10.2f}"
-            f"{r['realized_pnl']:>12.2f}{r['n_positions']:>5}"
+            f"{r['strategy']:<20}{r['equity']:>12,.0f}{r['return_pct']:>+10.2f}"
+            f"{r['realized_pnl']:>+12.2f}{r['n_positions']:>5}"
         )
         if has_alpha:
-            line += f"{r['alpha_pct']:>9.2f}"
+            line += f"{r['alpha_pct']:>+9.2f}"
         lines.append(line)
     if benchmark is not None:
         lines.append("-" * len(header))

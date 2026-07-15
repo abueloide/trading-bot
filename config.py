@@ -72,17 +72,6 @@ ALPACA_CONFIG: Dict[str, Any] = {
 }
 
 
-def get_api_credentials() -> Dict[str, str]:
-    """Compatibility shim: legacy code calls this for Binance creds."""
-    return {
-        "ALPACA_API_KEY": ALPACA_API_KEY,
-        "ALPACA_SECRET_KEY": ALPACA_SECRET_KEY,
-        # Aliases retained for any v1 code path not yet migrated.
-        "BINANCE_API": ALPACA_API_KEY,
-        "BINANCE_SECRET": ALPACA_SECRET_KEY,
-    }
-
-
 # =============================================================================
 # DATA COLLECTION CONFIGURATION
 # =============================================================================
@@ -163,6 +152,11 @@ RISK_CONFIG: Dict[str, Any] = {
     "max_sector_exposure_pct": 0.40,
     "min_cash_reserve_pct": 0.20,
     "max_cash_reserve_pct": 0.50,
+
+    # Risk Gate (segunda opinión que RECHAZA, no recorta) — decisión Luis 2026-07-07.
+    # Más estricto que el sizing base: éste rechaza la orden en lugar de recortarla.
+    "gate_position_cap": 0.20,               # rechazo si la posición > 20% del equity
+    "gate_sector_cap": 0.40,                 # rechazo si el sector > 40% del equity
 
     # Circuit breakers
     "max_daily_loss_pct": 0.05,

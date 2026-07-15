@@ -432,6 +432,19 @@ def test_format_warns_when_curve_has_gaps():
     assert "gap" in out.lower()
 
 
+def test_gap_note_names_the_missing_date():
+    # The GAP warning must surface *which* trading day is missing so a reader can
+    # tell a known permanent hole from a fresh missed run without opening cron.log.
+    snaps = [
+        _snap("2026-06-15", "x", 100.0, 0.0, 0.0),  # Mon
+        _snap("2026-06-17", "x", 102.0, 2.0, 1.0),  # Wed (Tue 06-16 missing)
+    ]
+    rows = build_checkpoint(snaps, min_days=1)
+    assert rows[0]["gap_dates"] == ["2026-06-16"]
+    out = format_checkpoint(rows, min_days=1)
+    assert "2026-06-16" in out
+
+
 def test_format_no_gap_warning_on_contiguous_curve():
     snaps = [
         _snap("2026-06-15", "x", 100.0, 0.0, 0.0),  # Mon

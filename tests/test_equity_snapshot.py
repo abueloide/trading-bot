@@ -65,3 +65,32 @@ def test_benchmark_pct_none_persists_as_null(tmp_path):
 
 def test_load_missing_file_returns_empty(tmp_path):
     assert load_snapshots(tmp_path / "nope.jsonl") == []
+
+
+def test_append_aborts_and_preserves_curve_on_corrupt_line(tmp_path):
+    # A corrupt line in an existing curve must NOT let append rewrite (and thus
+    # destroy) the whole history. It must abort and leave the file untouched.
+    # Audit #2.
+    path = tmp_path / "equity_curve.jsonl"
+    append_snapshot(_rows(), benchmark_pct=3.0, snapshot_date=date(2026, 6, 13), path=path)
+    good = path.read_text()
+    # Corrupt the curve, then attempt a new day's append.
+    path.write_text(good + "{ this line is corrupt\n")
+
+    with pytest.raises(SystemExit):
+        append_snapshot(_rows(), benchmark_pct=3.5, snapshot_date=date(2026, 6, 14), path=path)
+
+    # History (the two good rows + the corrupt line) is still on disk, not nuked.
+    assert path.read_text().startswith(good)
+
+
+def test_strict_read_raises_lenient_read_does_not(tmp_path):
+    path = tmp_path / "equity_curve.jsonl"
+    append_snapshot(_rows(), benchmark_pct=3.0, snapshot_date=date(2026, 6, 13), path=path)
+    path.write_text(path.read_text() + "garbage\n")
+    # Readers/reports stay lenient: a corrupt curve yields [] rather than crashing
+    # a display (and, crucially, never triggers a rewrite).
+    assert load_snapshots(path) == []
+    # The rewrite path refuses loudly instead.
+    with pytest.raises(SystemExit):
+        load_snapshots(path, strict=True)

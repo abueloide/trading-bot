@@ -23,8 +23,15 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 
-def load_snapshots(path) -> List[dict]:
-    """Read every snapshot record. Missing/unreadable file → empty list."""
+def load_snapshots(path, *, strict: bool = False) -> List[dict]:
+    """Read every snapshot record.
+
+    ``strict=False`` (readers/reports): a missing or unreadable file → empty
+    list, so a single bad line never breaks a display. ``strict=True`` (the
+    rewrite path in ``append_snapshot``): raise instead of returning ``[]`` — a
+    partial read must never be the basis for rewriting the equity curve, or one
+    corrupt byte would replace the whole experiment history with today's rows.
+    """
     path = Path(path)
     if not path.exists():
         return []
@@ -36,6 +43,12 @@ def load_snapshots(path) -> List[dict]:
                 if line:
                     records.append(json.loads(line))
     except (json.JSONDecodeError, OSError) as e:
+        if strict:
+            raise SystemExit(
+                f"FATAL: equity curve exists but is unreadable at {path}: {e}. "
+                "Refusing to rewrite history from a partial read (would lose the "
+                "curve). Restore the file from backup before the next run."
+            )
         logger.error("equity snapshot unreadable at %s: %s", path, e)
         return []
     return records
@@ -56,7 +69,7 @@ def append_snapshot(
     path = Path(path)
     day = snapshot_date.isoformat()
 
-    kept = [r for r in load_snapshots(path) if r.get("date") != day]
+    kept = [r for r in load_snapshots(path, strict=True) if r.get("date") != day]
     for r in rows:
         alpha = r.get("alpha_pct")
         kept.append(

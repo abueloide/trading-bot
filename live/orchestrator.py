@@ -21,6 +21,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 import pandas as pd
 
 from live.news_overlay import apply_news_overlay, fetch_sentiment
+from live.risk_gate import POSITION_HARD_CAP, SECTOR_HARD_CAP, gate_entry
 from live.portfolio_targets import (
     breakout_candidates,
     exit_signals,
@@ -181,7 +182,7 @@ class Orchestrator:
                 continue
             price = _last_price(local.get(sym))
             if price is not None:
-                self._do_buy(runner, vp, sym, price, weight_dollars)
+                self._do_buy(runner, vp, sym, price, weight_dollars, local)
 
     # ---------------------------------------------- slot-filling strategies
 
@@ -207,14 +208,24 @@ class Orchestrator:
         weight_dollars = vp.starting_cash / self._slots[runner.name]
         candidates = candidate_fn(runner.name, local, exclude=held)
         for sym, _rank, price in candidates[:slots]:
-            self._do_buy(runner, vp, sym, price, weight_dollars)
+            self._do_buy(runner, vp, sym, price, weight_dollars, local)
 
     # ------------------------------------------------------------ execution
 
-    def _do_buy(self, runner, vp, symbol: str, price: float, proposed_dollars: float) -> None:
+    def _do_buy(self, runner, vp, symbol: str, price: float, proposed_dollars: float, local) -> None:
         if vp.qty(symbol) > 0:
             return  # no pyramiding in v1
-        state = vp.to_portfolio_state(marks={symbol: price})
+        # Mark every current holding to market so risk sizing sees mark-to-market
+        # equity, not a cost-basis mix — the avg_entry fallback in
+        # to_portfolio_state otherwise hides all unrealized P&L from max_position_pct
+        # and the cash-reserve math (audit #6).
+        marks = {symbol: price}
+        for s in self._symbols[runner.name]:
+            if s != symbol and vp.qty(s) > 0:
+                p = _last_price(local.get(s))
+                if p is not None:
+                    marks[s] = p
+        state = vp.to_portfolio_state(marks=marks)
         # Never propose more than the slice's free cash can fund: with open
         # positions, equity > cash, and an equity-based size could pass risk but
         # fail record_buy after the broker already filled (ledger/reality drift).
@@ -234,6 +245,21 @@ class Orchestrator:
             logger.info("entry denied %s/%s: %s", runner.name, symbol, decision.reason)
             return
         qty = decision.adjusted_qty
+        # Second-opinion risk gate (TradingAgents pattern): over the ALREADY-sized
+        # order (qty * price), REJECT (not trim) if it breaches the hard caps
+        # (20% position / 40% sector). Can only HARDEN, never relax, evaluate_entry.
+        gate = gate_entry(
+            proposed_size_usd=qty * price,
+            portfolio=state,
+            base_decision=decision,
+            sector=_sector_of(symbol),
+            sector_of=_sector_of,
+            position_cap=self._risk.cfg.get("gate_position_cap", POSITION_HARD_CAP),
+            sector_cap=self._risk.cfg.get("gate_sector_cap", SECTOR_HARD_CAP),
+        )
+        if not gate.approved:
+            logger.info("entry gated %s/%s: %s", runner.name, symbol, gate.summary)
+            return
         if self._executor.buy(
             symbol=symbol, qty=qty, price=price, strategy=runner.name,
             strategy_type=runner.strategy_type, max_hold_days=runner.max_hold_days,
