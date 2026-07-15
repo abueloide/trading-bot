@@ -13,6 +13,15 @@ _(cola vacía — el loop genera idea nueva en el próximo ciclo)_
 
 ## Hecho
 
+### H4 — Mean-reversion de horizonte corto para régimen choppy  · HECHO · FAIL ❌ (2026-07-15)
+`bollinger_reversion` (reclaim de banda inferior 20/2σ → salida a SMA20, sin 200d).
+Gate FAIL (median_excess −64.99 / breadth 0.0 / median_sharpe 0.29 / min_trades 9).
+La tesis del régimen estaba mal: 2022-26 en large-caps NO fue choppy, fue un bull
+fuerte. MR de baja exposición captura migajas (casi todos verdes, PF>1) pero no le
+gana a buy-and-hold; Sharpe mediana 0.29 falla independiente del defecto de benchmark.
+Familia MR long-only en large-caps agotada bajo este gate. No desplegada.
+Postmortem: `docs/postmortems/2026-07-15-bollinger-reversion-h4.md`.
+
 ### H3 — Cartera multi-activo compuesta  · HECHO · CANCELADA ❌ (2026-07-14)
 Dependía de que H1 o H2 pasaran el gate por separado. **Ambas fallaron** (0 edge
 OOS). Diversificar sobre dos fuentes sin edge no produce edge; la composición no

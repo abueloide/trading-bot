@@ -292,6 +292,47 @@ def strategy_bollinger_breakout(
     return sig
 
 
+def strategy_bollinger_reversion(
+    df: pd.DataFrame, period: int = 20, std: float = 2.0,
+) -> pd.DataFrame:
+    """Strategy G — short-horizon mean-reversion for the choppy regime.
+
+    Thesis (H4): every trend/momentum/breakout horse died in 2022-26 because the
+    tape was range-bound/whipsaw — there was no persistent direction to ride
+    (trend_pullback, pullback_ride, donchian, momentum, crypto momentum,
+    commodities trend: all FAIL gate). The mirror image of *why they died* is
+    edge for mean-reversion: in a choppy tape, stretched short-term moves snap
+    back to the mean. The two prior MR horses (rsi_mr, confirmed_mr) never got
+    to test this cell — both gate on a 200-day SMA regime line that never
+    accumulates enough bars inside a 6-month walk-forward OOS window, so they
+    effectively sit in cash there. This uses ONLY short lookbacks (20-bar band),
+    no 200d filter, so every gate is valid inside the OOS window.
+
+    Entry: close was BELOW the lower band on the prior bar and closes back
+           ABOVE it today — a stretched-down move that has begun to snap back
+           (reclaim, not a falling knife: we wait for the turn, not the extreme).
+    Exit:  close >= the middle band (SMA20) — reversion to the mean complete.
+           Time-stopped by the engine (max_hold_days) if the snap-back stalls.
+
+    Distinct from bollinger_breakout, which buys UPPER-band breaks and rides up;
+    this buys LOWER-band reclaims and sells into the mean. Opposite sign, same
+    bands.
+
+    Regime it expects to work in: range-bound / mean-reverting markets (the exact
+    2022-26 OOS regime that broke every directional horse). It should bleed in a
+    strong one-way trend, where "oversold" keeps getting more oversold — but the
+    walk-forward gate is precisely the test of whether that regime dominates.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < period + 1:
+        return sig
+    _upper, mid, lower = bollinger(df["close"], period, std)
+    reclaim = (df["close"].shift(1) < lower.shift(1)) & (df["close"] >= lower)
+    sig["entry"] = reclaim
+    sig["exit"] = df["close"] >= mid
+    return sig
+
+
 # ---------------------------------------------------------- registry
 
 STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
@@ -351,6 +392,12 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "type": "breakout",
         "max_hold_days": None,
         "description": "Legacy Bollinger band breakout",
+    },
+    "bollinger_reversion": {
+        "fn": strategy_bollinger_reversion,
+        "type": "mean_reversion",
+        "max_hold_days": 10,
+        "description": "Lower-band reclaim mean-reversion, short lookbacks only (H4)",
     },
 }
 
