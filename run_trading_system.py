@@ -34,15 +34,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("horse_race")
 
-SLICE = 25_000.0  # virtual cash per strategy (paper) — 3 horses × $25k = $75k
+SLICE = 25_000.0  # virtual cash per strategy (paper) — 4 horses × $25k = $100k
 STATE_PATH = Path("data/ledgers/state.json")
 EQUITY_CURVE_PATH = Path("data/ledgers/equity_curve.jsonl")
 REBALANCE_REFERENCE = "SPY"  # market-calendar anchor for the monthly rebalance
 BENCHMARK_SYMBOL = "SPY"  # buy-and-hold yardstick for the alpha column
-# Inception of the clean $25k×N epoch: the ledgers were reset to $25k and all
-# horses read 0.00% on 2026-06-05 (see data/cron.log). Alpha is measured from
-# here so the benchmark covers the exact same window as the live ledgers.
-RACE_INCEPTION = date(2026, 6, 5)
+# Inception of the clean $25k×N epoch: the ledgers were reset to $25k and the
+# Alpaca paper account flattened when the 4th horse (donchian_breakout) joined,
+# so all four read 0.00% on 2026-06-25 (see scripts/reset_race.py + cron.log).
+# Alpha is measured from here so the benchmark covers the same window as the
+# live ledgers.
+RACE_INCEPTION = date(2026, 6, 25)
 
 # Risk overlay tuned for a diversified equal-weight horse race: many small
 # equal-weight slots (momentum 15, MR 10), near-full deployment, no sector cap
@@ -74,6 +76,9 @@ STRATEGIES = [
     StrategyConfig("momentum_rotation", UNIVERSE, SLICE, max_positions=15),
     StrategyConfig("confirmed_mr", UNIVERSE, SLICE, max_positions=10),
     StrategyConfig("rsi_mr", UNIVERSE, SLICE, max_positions=10),
+    # 4th horse (2026-06-25): Donchian 20/10 breakout — a trend-following style
+    # distinct from momentum (6m winners) and mean-reversion (oversold dips).
+    StrategyConfig("donchian_breakout", UNIVERSE, SLICE, max_positions=10),
     # NOTE: a 4th horse (momentum_news) was retired 2026-06-13. It paired the
     # momentum engine with an AlphaVantage NEWS_SENTIMENT veto, but the free tier
     # cannot serve it: NEWS_SENTIMENT returns 0 articles for a multi-ticker basket
@@ -168,6 +173,20 @@ def main() -> int:
     logger.info("ledger state saved to %s", STATE_PATH)
 
     marks = {sym: float(df["close"].iloc[-1]) for sym, df in snapshot.items() if len(df)}
+    # No silent cost-basis fallback: VirtualPortfolio.to_portfolio_state marks a
+    # held name with no fresh price at its entry cost (avg_entry), which fabricates
+    # that position's value — equity then looks calmer than reality on exactly the
+    # days data is flaky, with zero trace. Coverage is ~full today (503-504/504),
+    # but shout the day it isn't so a tainted equity/return is never silent.
+    held_unmarked = sorted(
+        {sym for vp in portfolios for sym in vp.to_dict()["lots"] if sym not in marks}
+    )
+    if held_unmarked:
+        logger.warning(
+            "%d HELD symbols missing a fresh mark -> valued at entry cost (equity "
+            "understated/tainted this run): %s",
+            len(held_unmarked), ", ".join(held_unmarked),
+        )
     benchmark, benchmark_pct = resolve_benchmark(snapshot)
     rows = build_report(portfolios, marks=marks, benchmark_pct=benchmark_pct)
     print(format_table(rows, benchmark=benchmark))

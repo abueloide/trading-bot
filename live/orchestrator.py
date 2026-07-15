@@ -22,6 +22,7 @@ import pandas as pd
 
 from live.news_overlay import apply_news_overlay, fetch_sentiment
 from live.portfolio_targets import (
+    breakout_candidates,
     exit_signals,
     momentum_top,
     oversold_candidates,
@@ -30,18 +31,29 @@ from live.ports import ExecutorPort
 from live.strategy_runner import StrategyRunner
 from live.virtual_portfolio import VirtualPortfolio
 from risk_manager import RiskManager
+from sp500_constituents import SP500_CONSTITUENTS
 
 logger = logging.getLogger(__name__)
 
 LOOKBACK_BARS = 260  # ~1y of daily bars; enough for 200d / momentum filters.
 
 # Default basket sizes per strategy type (number of equal-weight slots).
-DEFAULT_SLOTS = {"momentum": 15, "mean_reversion": 10}
+DEFAULT_SLOTS = {"momentum": 15, "mean_reversion": 10, "breakout": 10}
 _FALLBACK_SLOTS = 5
 
 # When a momentum horse runs a news overlay, rank a deeper pool so vetoed names
 # can be replaced by the next-best survivors instead of shrinking the basket.
 NEWS_POOL_FACTOR = 3
+
+# Cap momentum picks per GICS sector so the basket can't collapse into one hot
+# theme (the 06-25 audit found 12/15 holdings were "Technology"/semis). 3 leaves
+# room for a real momentum tilt without becoming a single-sector leveraged bet.
+MAX_PER_SECTOR = 3
+_SECTOR_OF = {d["symbol"]: d["sector"] for d in SP500_CONSTITUENTS}
+
+
+def _sector_of(symbol: str) -> str:
+    return _SECTOR_OF.get(symbol, "Unknown")
 
 
 @dataclass
@@ -104,8 +116,10 @@ class Orchestrator:
             vp = self._portfolios[strategy]
             if runner.strategy_type == "momentum":
                 self._run_momentum(runner, vp, local, is_rebalance_day)
+            elif runner.strategy_type == "breakout":
+                self._run_slot_filler(runner, vp, local, breakout_candidates)
             else:
-                self._run_mean_reversion(runner, vp, local)
+                self._run_slot_filler(runner, vp, local, oversold_candidates)
 
     def _fetch_bars(self) -> Dict[str, Optional[pd.DataFrame]]:
         symbols = sorted({s for syms in self._symbols.values() for s in syms})
@@ -135,8 +149,8 @@ class Orchestrator:
         no-op and this degrades to plain momentum top-n.
         """
         if not self._news_overlay.get(name):
-            return momentum_top(local, n)
-        pool = momentum_top(local, n * NEWS_POOL_FACTOR)
+            return momentum_top(local, n, sector_of=_sector_of, max_per_sector=MAX_PER_SECTOR)
+        pool = momentum_top(local, n * NEWS_POOL_FACTOR, sector_of=_sector_of, max_per_sector=MAX_PER_SECTOR)
         sentiment = self._news_fetcher(pool)
         basket = apply_news_overlay(pool, sentiment, n)
         vetoed = len(pool[:n]) - len(set(basket) & set(pool[:n]))
@@ -169,23 +183,30 @@ class Orchestrator:
             if price is not None:
                 self._do_buy(runner, vp, sym, price, weight_dollars)
 
-    # -------------------------------------------------------- mean reversion
+    # ---------------------------------------------- slot-filling strategies
 
-    def _run_mean_reversion(self, runner, vp, local) -> None:
+    def _run_slot_filler(self, runner, vp, local, candidate_fn) -> None:
+        """Shared cycle for mean-reversion and breakout horses.
+
+        Both work the same way: close holdings whose exit fired, then fill the
+        freed equal-weight slots from a ranked candidate list. They differ only
+        in how candidates are ranked — ``candidate_fn`` (oversold-by-RSI for MR,
+        breakout-strength for breakout) returns the same (symbol, _, price) shape.
+        """
         held = {s for s in self._symbols[runner.name] if vp.qty(s) > 0}
-        # 1) Close recovered holdings first (frees both slots and cash).
+        # 1) Close exited holdings first (frees both slots and cash).
         for sym in exit_signals(runner.name, local, held):
             price = _last_price(local.get(sym))
             if price is not None:
                 self._do_sell(vp, sym, price)
         held = {s for s in self._symbols[runner.name] if vp.qty(s) > 0}
-        # 2) Fill open slots with the most-oversold fresh candidates.
+        # 2) Fill open slots with the top-ranked fresh candidates.
         slots = self._slots[runner.name] - len(held)
         if slots <= 0:
             return
         weight_dollars = vp.starting_cash / self._slots[runner.name]
-        candidates = oversold_candidates(runner.name, local, exclude=held)
-        for sym, _rsi2, price in candidates[:slots]:
+        candidates = candidate_fn(runner.name, local, exclude=held)
+        for sym, _rank, price in candidates[:slots]:
             self._do_buy(runner, vp, sym, price, weight_dollars)
 
     # ------------------------------------------------------------ execution

@@ -49,7 +49,7 @@ DEEP_DRAWDOWN_PCT = -15.0
 # Minimum information ratio (mean ÷ stdev of the *daily* active return) for a
 # horse to read as a clean candidate. If the average day-over-day alpha gain
 # doesn't clear its day-to-day standard deviation, the "edge" is smaller than its
-# noise — exactly the false positive 3 horses × ~10 days will manufacture by luck.
+# noise — exactly the false positive a field of N horses × ~10 days will manufacture by luck.
 MIN_ALPHA_SIGNAL_RATIO = 1.0
 
 # The one verdict string that reads as a real go-look signal for the operator.
@@ -334,8 +334,9 @@ def build_checkpoint(
 def _selection_bias_note(rows: List[dict]) -> Optional[str]:
     """Warn that reading the *best* of N horses inflates the apparent edge.
 
-    The PLAN names this as the central statistical risk: with 3 horses over
-    ~10 days, the single best one beating SPY is partly a selection effect, not
+    The PLAN names this as the central statistical risk: with a field of N
+    horses over ~10 days (currently 4), the single best one beating SPY is
+    partly a selection effect, not
     proof of skill. ``classify_edge`` gates each horse against its *own* noise,
     but it can't see that the operator will look at the winner — and the chance
     that the best of N independent horses clears the bar by luck scales roughly

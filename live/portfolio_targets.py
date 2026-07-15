@@ -14,7 +14,7 @@ ranked candidate lists. It is pure (no I/O, no broker) and offline-testable.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -47,11 +47,36 @@ def momentum_scores(bars_by_symbol: Dict[str, pd.DataFrame]) -> Dict[str, float]
     return scores
 
 
-def momentum_top(bars_by_symbol: Dict[str, pd.DataFrame], n: int) -> List[str]:
-    """Top-`n` symbols by momentum score, positive scores only (descending)."""
+def momentum_top(
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    n: int,
+    *,
+    sector_of: Optional[Callable[[str], str]] = None,
+    max_per_sector: Optional[int] = None,
+) -> List[str]:
+    """Top-`n` symbols by momentum score, positive scores only (descending).
+
+    When `sector_of` and `max_per_sector` are given, enforce a per-sector cap
+    while filling the basket: walk names strongest-first, skip any whose sector
+    already holds `max_per_sector` picks. Without a cap, behaviour is unchanged.
+    This stops the basket from collapsing into one hot sector (e.g. 12/15 semis)
+    — the difference between an edge and a leveraged single-theme bet.
+    """
     scores = momentum_scores(bars_by_symbol)
-    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    return [sym for sym, score in ranked if score > 0][:n]
+    ranked = [s for s, score in sorted(scores.items(), key=lambda kv: kv[1], reverse=True) if score > 0]
+    if sector_of is None or max_per_sector is None:
+        return ranked[:n]
+    picked: List[str] = []
+    per_sector: Dict[str, int] = {}
+    for sym in ranked:
+        sec = sector_of(sym)
+        if per_sector.get(sec, 0) >= max_per_sector:
+            continue
+        picked.append(sym)
+        per_sector[sec] = per_sector.get(sec, 0) + 1
+        if len(picked) >= n:
+            break
+    return picked
 
 
 def oversold_candidates(
@@ -82,6 +107,44 @@ def oversold_candidates(
             continue
         out.append((sym, float(r2), price))
     out.sort(key=lambda t: t[1])
+    return out
+
+
+def breakout_candidates(
+    strategy_name: str,
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    exclude: Optional[set] = None,
+    entry_lookback: int = 20,
+) -> List[Tuple[str, float, float]]:
+    """Symbols whose last bar fires this breakout strategy's entry, ranked by
+    breakout strength (how far close cleared the prior N-day high), strongest first.
+
+    Returns (symbol, strength, last_price) tuples — same shape as
+    ``oversold_candidates`` so the orchestrator fills slots identically. When
+    more names break out than there are open slots, the ones that cleared the
+    channel most decisively win. ``entry_lookback`` must match the strategy's
+    entry window (20, the registry default).
+    """
+    exclude = exclude or set()
+    fn = STRATEGY_REGISTRY[strategy_name]["fn"]
+    out: List[Tuple[str, float, float]] = []
+    for sym, df in bars_by_symbol.items():
+        if sym in exclude or not _usable(df):
+            continue
+        if "high" not in df.columns or len(df) < entry_lookback + 1:
+            continue
+        try:
+            sig = fn(df)
+        except Exception:
+            continue
+        if len(sig) == 0 or not bool(sig["entry"].iloc[-1]):
+            continue
+        prior_high = float(df["high"].iloc[-(entry_lookback + 1):-1].max())
+        price = float(df["close"].iloc[-1])
+        if prior_high <= 0 or price <= 0:
+            continue
+        out.append((sym, price / prior_high - 1.0, price))
+    out.sort(key=lambda t: t[1], reverse=True)
     return out
 
 
