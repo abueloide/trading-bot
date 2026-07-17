@@ -13,6 +13,17 @@ _(cola vacía — el loop genera idea nueva en el próximo ciclo)_
 
 ## Hecho
 
+### H5 — Donchian breakout con salida ATR-buffered  · HECHO · FAIL ❌ (2026-07-16)
+`donchian_atr_ride` (entrada máximo 20d, salida mínimo 10d − 1.5×ATR14). Gate FAIL
+(median_excess −61.3 / breadth 0.0 / **median_sharpe 0.54** / min_trades 5). El buffer
+ATR **sí levantó el Sharpe** (mejor de todas las fallidas: bollinger 0.29, donchian
+0.21) — la tesis del whipsaw era correcta — pero 0.54 < 0.80. Sigue perdiendo contra
+B&H: un breakout se sienta en cash entre rupturas y en un bull sacrifica exposición.
+excess/breadth contaminados por el defecto de benchmark; el killer limpio es el Sharpe.
+Familia breakout long-only agotada en large-caps 2022-26. Próxima idea con chance:
+**trend-hold always-in** (mantenerse invertido, solo cortar drawdowns), no timing de
+ruptura. No desplegada. Postmortem: `docs/postmortems/2026-07-16-donchian-atr-ride-h5.md`.
+
 ### H4 — Mean-reversion de horizonte corto para régimen choppy  · HECHO · FAIL ❌ (2026-07-15)
 `bollinger_reversion` (reclaim de banda inferior 20/2σ → salida a SMA20, sin 200d).
 Gate FAIL (median_excess −64.99 / breadth 0.0 / median_sharpe 0.29 / min_trades 9).

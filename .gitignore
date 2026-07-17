@@ -18,3 +18,4 @@ backtesting/results/
 *.sqlite
 *.sqlite3
 *.csv.bak
+graphify-out/

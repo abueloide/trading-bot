@@ -51,6 +51,20 @@ def bollinger(series: pd.Series, period: int = 20, std: float = 2.0):
     return mid + std * sd, mid, mid - std * sd
 
 
+def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Average True Range — volatility in price units."""
+    prev_close = df["close"].shift(1)
+    true_range = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - prev_close).abs(),
+            (df["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return true_range.rolling(period, min_periods=1).mean()
+
+
 # ------------------------------------------------------------ helper builders
 
 def _empty_signals(df: pd.DataFrame) -> pd.DataFrame:
@@ -333,6 +347,46 @@ def strategy_bollinger_reversion(
     return sig
 
 
+def strategy_donchian_atr_ride(
+    df: pd.DataFrame,
+    entry_lookback: int = 20,
+    exit_lookback: int = 10,
+    atr_period: int = 14,
+    atr_mult: float = 1.5,
+) -> pd.DataFrame:
+    """Strategy H — 20-day-high breakout with a volatility-buffered exit.
+
+    Thesis: donchian_breakout (H2) died from whipsaw — its 10-day-low exit was
+    too tight, so every shallow pullback stopped it out before the trend
+    resumed. The entry (buy a new local high) is not what killed it: H4's
+    postmortem established the 2022-26 large-cap tape was a *strong bull*, so
+    new-high breakouts do catch real trends. The untested fix is the exit: widen
+    it by an ATR buffer so it adapts to each name's volatility. The stop only
+    triggers on a break that clears the recent low by 1.5×ATR — noise inside the
+    trend is held, a genuine trend break still exits. Same entry as donchian,
+    strictly looser (later) exit.
+
+    Entry: close breaks ABOVE the prior ``entry_lookback``-bar high.
+    Exit:  close < (prior ``exit_lookback``-bar low − ``atr_mult`` × ATR), using
+           the PRIOR bar's ATR/low so the stop is known before today's bar.
+
+    Regime it expects to work in: persistent large-cap UPTRENDS that pull back
+    shallowly (the exact BALANCED-universe OOS regime, ~2024-26). It should bleed
+    in a choppy/range-bound tape where breakouts fail repeatedly — but a wider
+    stop means fewer, larger whipsaws there, not more. Short lookbacks (20/10/14)
+    so every gate is valid inside the ~6-month walk-forward OOS window.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < entry_lookback + 1:
+        return sig
+    upper = df["high"].rolling(entry_lookback).max().shift(1)
+    lower = df["low"].rolling(exit_lookback).min().shift(1)
+    buffer = atr_mult * atr(df, atr_period).shift(1)
+    sig["entry"] = df["close"] > upper
+    sig["exit"] = df["close"] < (lower - buffer)
+    return sig
+
+
 # ---------------------------------------------------------- registry
 
 STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
@@ -398,6 +452,12 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "type": "mean_reversion",
         "max_hold_days": 10,
         "description": "Lower-band reclaim mean-reversion, short lookbacks only (H4)",
+    },
+    "donchian_atr_ride": {
+        "fn": strategy_donchian_atr_ride,
+        "type": "breakout",  # signal exit (ATR-buffered channel break), no time stop
+        "max_hold_days": None,
+        "description": "20-day-high breakout, exit on 10-day-low − 1.5×ATR (H5)",
     },
 }
 
