@@ -9,7 +9,14 @@ Estados: PENDIENTE · EN CURSO · HECHO (con veredicto).
 
 ## Prioridad
 
-_(cola vacía — el loop genera idea nueva en el próximo ciclo)_
+**PIVOTE 2026-07-17 → event-driven.** El daily-bar long-only está agotado (H1-H5
+FAIL). El loop **NO debe generar más ideas daily-bar** (quemar Opus en pozo seco).
+Dirección nueva en `PLAN-event-driven.md`. La Fase 1 (harness event-window +
+E1/E2/E3) la construye el PO en sesión interactiva, no el loop autónomo (es
+greenfield, no una variante de estrategia). El loop queda en hold hasta que exista
+el harness event; luego se le encolan E1/E2/E3 para grindear.
+
+- **E1/E2/E3** (catalizadores agendados) → PENDIENTE, bloqueadas por el harness Fase 1.
 
 ## Hecho
 
