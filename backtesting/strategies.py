@@ -387,6 +387,49 @@ def strategy_donchian_atr_ride(
     return sig
 
 
+def strategy_regime_trend_hold(
+    df: pd.DataFrame,
+    trend_period: int = 50,
+    slope_lookback: int = 10,
+    exit_buffer: float = 0.03,
+) -> pd.DataFrame:
+    """Strategy H6 — always-in trend hold, buffered exit (no breakout timing).
+
+    Thesis: every prior long-only strategy (H1-H5 + legacy) died the same way —
+    it sat in CASH too much and lost to a strong-bull buy-and-hold (breadth 0.0
+    across the board). Breakout (H5) got the best failed Sharpe (0.54) but still
+    bled because it only enters on a *new high* and idles between ruptures. The
+    untested structural fix, named in H5's postmortem: stop timing ruptures and
+    instead STAY INVESTED for the whole uptrend, cutting only sustained
+    downtrends. That raises invested-time (fixes breadth) and, by dodging the
+    deep down-legs, should lift risk-adjusted return (the one clean gate axis,
+    since excess/breadth are contaminated by the benchmark-window defect).
+
+    To avoid the whipsaw that killed the breakout family, entry is gated twice:
+    price above the trend SMA AND the SMA itself *rising* (refuses to buy into a
+    flat, chopping MA). Exit only on a DECISIVE break — close below the SMA by
+    ``exit_buffer`` — so shallow pullbacks are held, not sold into.
+
+    Entry: close > SMA(trend_period) AND SMA rising over ``slope_lookback`` bars.
+    Exit:  close < SMA(trend_period) × (1 − ``exit_buffer``).
+    Both use the PRIOR bar's SMA (shifted) so no lookahead.
+
+    Regime it expects to work in: persistent uptrends with shallow pullbacks
+    (the BALANCED OOS tape, ~2024-26). It should bleed in sharp V-bottoms (exits
+    on the buffer break, re-enters higher) and in prolonged flat chop — but the
+    slope filter refuses entry there, capping the damage. Short lookback (50/10)
+    stays valid inside the ~6-month walk-forward OOS window.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < trend_period + slope_lookback + 1:
+        return sig
+    trend = sma(df["close"], trend_period).shift(1)
+    rising = trend > trend.shift(slope_lookback)
+    sig["entry"] = (df["close"] > trend) & rising
+    sig["exit"] = df["close"] < trend * (1.0 - exit_buffer)
+    return sig
+
+
 # ---------------------------------------------------------- registry
 
 STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
@@ -458,6 +501,12 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "type": "breakout",  # signal exit (ATR-buffered channel break), no time stop
         "max_hold_days": None,
         "description": "20-day-high breakout, exit on 10-day-low − 1.5×ATR (H5)",
+    },
+    "regime_trend_hold": {
+        "fn": strategy_regime_trend_hold,
+        "type": "trend",  # always-in while trend up, buffered SMA-break exit, no time stop
+        "max_hold_days": None,
+        "description": "Always-in above rising SMA50, exit on decisive 3% break below (H6)",
     },
 }
 
