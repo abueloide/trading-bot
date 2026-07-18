@@ -53,15 +53,17 @@ MIN_TAIL_RATIO = 1.2     # ganancia media / |pérdida media| — la asimetría d
 
 
 def _forward_drift_returns(
-    df, event_dates: List[str], window_days: int
+    df, event_dates: List[str], window_days: int, mode: str = "drift"
 ) -> List[float]:
-    """Por cada evento: sign(mov del día del evento) × retorno de `window_days` después.
+    """Por cada evento: retorno de `window_days` post-evento, con señal según `mode`.
 
     Entra al cierre del día del evento, sale `window_days` sesiones después.
-    El signo hace la señal tradeable (continuación en la dirección del evento).
+    - mode="drift": sigue el movimiento del día del evento (continuación).
+    - mode="fade":  apuesta contra el movimiento del día del evento (reversión).
     """
     idx = list(df.index)
     close = df["close"]
+    direction = -1.0 if mode == "fade" else 1.0
     out: List[float] = []
     for ds in event_dates:
         ts = _nearest_index(idx, ds)
@@ -75,7 +77,7 @@ def _forward_drift_returns(
         if event_move == 0:
             continue
         sign = 1.0 if event_move > 0 else -1.0
-        out.append(sign * fwd)
+        out.append(direction * sign * fwd)
     return out
 
 
@@ -129,20 +131,20 @@ def gate_event(stats: Dict[str, float]) -> Dict[str, object]:
     return {"passed": passed, "reason": "clean" if passed else "failed: " + ", ".join(failed), "checks": checks}
 
 
-def run(event: str, symbols: List[str], windows=(1, 3, 5), years=(2022, 2025)) -> None:
+def run(event: str, symbols: List[str], windows=(1, 3, 5), years=(2022, 2025), mode="drift") -> None:
     from backtesting.engine import load_bars
     dates = CALENDARS.get(event)
     if not dates:
         print(f"Evento desconocido: {event}. Conocidos: {list(CALENDARS)}", file=sys.stderr)
         raise SystemExit(2)
     start, end = date(years[0], 1, 1), date(years[1], 1, 1)
-    print(f"Event-study: {event} ({len(dates)} eventos) · {', '.join(symbols)} · ventanas {windows}d\n")
+    print(f"Event-study [{mode}]: {event} ({len(dates)} eventos) · {', '.join(symbols)} · ventanas {windows}d\n")
     for sym in symbols:
         df = load_bars(sym, start, end, "1d", source="yfinance")
         if df is None or df.empty:
             print(f"  {sym}: sin datos"); continue
         for w in windows:
-            rets = _forward_drift_returns(df, dates, w)
+            rets = _forward_drift_returns(df, dates, w, mode)
             stats = event_study(rets)
             g = gate_event(stats)
             verdict = "PASS ✅" if g["passed"] else "FAIL ❌"
@@ -174,8 +176,9 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args == ["--selfcheck"]:
         _selfcheck()
-    elif len(args) == 2:
-        run(args[0], [s.strip().upper() for s in args[1].split(",")])
+    elif len(args) in (2, 3):
+        mode = args[2] if len(args) == 3 else "drift"
+        run(args[0], [s.strip().upper() for s in args[1].split(",")], mode=mode)
     else:
         print(__doc__)
         raise SystemExit(2)
