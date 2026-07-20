@@ -28,6 +28,13 @@ Umbrales (`backtesting/gate.py`):
 | `median_sharpe` | mediana ≥ 0.80 | retorno ajustado a riesgo |
 | `min_trades` | ≥5 trades/símbolo | pocos trades = azar, no señal |
 
+**El split temporal debe CRUZAR régimen macro.** Partir el in-sample en dos mitades
+no es validación si ambas viven en el mismo régimen. La candidata C1 (GLD fade
+post-FOMC) aguantó las dos mitades de 2022-24 y murió al tocar 2015-2021: lo que
+medíamos era el ciclo de hikes, no el evento. Si el periodo de prueba no incluye un
+régimen distinto, la "validación temporal" no vale.
+(Postmortem: `postmortems/2026-07-20-gld-fade-fomc-c1.md`.)
+
 **Por qué mediana + amplitud y no promedio:** momentum_rotation dio excess
 promedio **+9.1%** — pero era **un solo outlier (NVDA +118.7%)**; los otros 4
 símbolos negativos. Un gate por promedio aprueba ese espejismo. El gate por

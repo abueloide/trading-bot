@@ -16,9 +16,24 @@ E1/E2/E3) la construye el PO en sesión interactiva, no el loop autónomo (es
 greenfield, no una variante de estrategia). El loop queda en hold hasta que exista
 el harness event; luego se le encolan E1/E2/E3 para grindear.
 
-- **E1/E2/E3** (catalizadores agendados) → PENDIENTE, bloqueadas por el harness Fase 1.
+- **E2** — drift direccional post-sorpresa CPI (SPY/QQQ) → **PENDIENTE**. Necesita
+  calendario CPI (mensual, público) en `CALENDARS`; el harness ya existe.
+- **E3** — post-earnings drift en large-caps → **PENDIENTE**. Necesita fechas de
+  earnings por símbolo (yfinance las trae).
+- **E1** — GLD/USO en ventana FOMC/OPEC → **HECHO · FAIL ❌** (ver abajo).
 
 ## Hecho
+
+### E1 — Oro en ventana FOMC (candidata C1: GLD fade)  · HECHO · FAIL ❌ (2026-07-20)
+El OOS real la mató. Se verificaron las 24 fechas 2022-24 contra federalreserve.gov
+(24/24 correctas) y se cargaron las 55 fechas 2015-2021 verificadas. Misma regla, sin
+retoques: exp 3d **−0.01%** / hit 44% y 5d +0.13% / hit 49%, contra +0.79%/67% y
++1.05%/71% in-sample. El hit rate colapsa a moneda al aire → no era edge, era el
+régimen de hikes 2022-24. El 5d pasa el gate-event por tecnicismo (tail 1.21 vs 1.20)
+pero ≈1% bruto anual antes de costos. C1 archivada, no desplegada.
+Postmortem: `docs/postmortems/2026-07-20-gld-fade-fomc-c1.md`.
+**Lección de método:** partir el in-sample por la mitad NO es validación temporal si
+ambas mitades caen en el mismo régimen macro.
 
 ### H5 — Donchian breakout con salida ATR-buffered  · HECHO · FAIL ❌ (2026-07-16)
 `donchian_atr_ride` (entrada máximo 20d, salida mínimo 10d − 1.5×ATR14). Gate FAIL

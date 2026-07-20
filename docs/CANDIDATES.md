@@ -6,7 +6,14 @@ a la siguiente validación. Método: `PLAN-event-driven.md` / `event_study.py`.
 
 ---
 
-## C1 — GLD (oro) fade post-FOMC · 3-5 días · PROMETEDORA (2026-07-18)
+## C1 — GLD (oro) fade post-FOMC · 3-5 días · ❌ MUERTA EN OOS (2026-07-20)
+
+> **Archivada.** El OOS real 2015-2021 (55 FOMC verificados) tumbó la tesis:
+> exp 3d **−0.01%** / hit 44% (vs +0.79% / 67% in-sample), 5d +0.13% / hit 49%.
+> Era efecto del régimen de hikes 2022-24, no anomalía del evento. NO va a paper.
+> Postmortem: `docs/postmortems/2026-07-20-gld-fade-fomc-c1.md`.
+> Lo de abajo queda como registro de la tesis original.
+
 
 **Regla:** el día del anuncio FOMC, al cierre, tomar posición en GLD **contra** el
 movimiento del día (si GLD subió en el anuncio → corto; si bajó → largo). Salir a
@@ -37,8 +44,8 @@ revierte en los días siguientes.
 - Se probaron 4 símbolos × 3 ventanas × 2 modos → hay riesgo de multiple-testing;
   GLD sobrevive placebo + split, pero la barra del gate-event es laxa a propósito.
 
-**Siguientes pasos antes de paper:**
-1. OOS real: fechas FOMC verificadas 2015-2021 → correr GLD-fade ahí.
-2. Verificar las 24 fechas 2022-24 contra la Fed.
+**Siguientes pasos antes de paper:** (ejecutados 2026-07-20 → mataron la candidata)
+1. ~~OOS real: fechas FOMC verificadas 2015-2021 → correr GLD-fade ahí.~~ ❌ FAIL.
+2. ~~Verificar las 24 fechas 2022-24 contra la Fed.~~ ✅ 24/24 correctas.
 3. Definir regla ejecutable + sizing para long-shot (cuánto por evento).
 4. Paper valida cableado → luego el $5k real (gatillo de Luis).
