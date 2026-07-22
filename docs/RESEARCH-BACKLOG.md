@@ -16,13 +16,33 @@ E1/E2/E3) la construye el PO en sesión interactiva, no el loop autónomo (es
 greenfield, no una variante de estrategia). El loop queda en hold hasta que exista
 el harness event; luego se le encolan E1/E2/E3 para grindear.
 
-- **E2** — drift direccional post-sorpresa CPI (SPY/QQQ) → **PENDIENTE**. Necesita
-  calendario CPI (mensual, público) en `CALENDARS`; el harness ya existe.
-- **E3** — post-earnings drift en large-caps → **PENDIENTE**. Necesita fechas de
-  earnings por símbolo (yfinance las trae).
+- **E2** — drift direccional post-sorpresa CPI (SPY/QQQ) → **PENDIENTE · BLOCKED-DATA**.
+  Necesita calendario CPI verificado en `CALENDARS`. El loop autónomo NO lo puede drenar:
+  BLS/FRED/ALFRED devuelven 403/timeout desde el sandbox (WebFetch y egress general los
+  firewallean); solo Yahoo/DBnomics son alcanzables y DBnomics no da fechas de *publicación*.
+  Cargar 120 fechas a mano sin fuente verificable repetiría el fallo que E1 nos enseñó a
+  evitar. **Acción para Luis (sesión interactiva):** pegar el schedule de release CPI 2015-24
+  (bls.gov/schedule/archives o FRED release_id=10 con API key) o dar una ruta de datos.
+- **E3** — post-earnings drift en large-caps → **PENDIENTE · BLOCKED-DATA parcial**.
+  yfinance `get_earnings_dates` solo trae ~4 trimestres recientes, no 10 años → muy pocos
+  eventos por símbolo para un OOS largo. Necesita histórico de earnings por símbolo (fuente
+  aparte) + soporte de calendario **por-símbolo** en el harness (hoy `CALENDARS` es lista
+  compartida por evento). PO-interactivo, no loop.
+- **E1b** — SPY/QQQ post-FOMC drift **y** fade (mismo calendario verificado) → **HECHO ·
+  FAIL ❌** (2026-07-22, ver abajo).
 - **E1** — GLD/USO en ventana FOMC/OPEC → **HECHO · FAIL ❌** (ver abajo).
 
 ## Hecho
+
+### E1b — SPY/QQQ post-FOMC drift+fade  · HECHO · FAIL ❌ (2026-07-22)
+El otro lado del evento de E1: índices de equity en la ventana FOMC (calendario ya
+verificado). **El signo se invierte con el régimen.** OOS 2015-21 (ZIRP): equities
+*driftean* (SPY 1d/3d, QQQ 5d pasan gate-event). IS 2022-24 (hikes): equities *fadean*
+(SPY/QQQ 3d/5d pasan, exp +0.44…+0.76%). **Cero celdas pasan en ambos regímenes** y el
+modo ganador se voltea → no hay regla direccional fija desplegable; es reacción
+condicional al régimen macro, igual que E1 con GLD. La familia "regla direccional fija
+en ventana FOMC" queda agotada (GLD fade + equity drift/fade). No desplegada.
+Postmortem: `docs/postmortems/2026-07-22-spy-qqq-fomc-drift-e1b.md`.
 
 ### E1 — Oro en ventana FOMC (candidata C1: GLD fade)  · HECHO · FAIL ❌ (2026-07-20)
 El OOS real la mató. Se verificaron las 24 fechas 2022-24 contra federalreserve.gov
