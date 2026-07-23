@@ -15,8 +15,10 @@ muestra mínima. Para un long-shot de cola gorda no se puede exigir p-value (N c
 se exige asimetría y pérdida acotada. Ver docs/PLAN-event-driven.md.
 
 Uso:
-    python events/event_study.py FOMC SPY,QQQ,GLD,USO [drift|fade] [2015:2022]
+    python events/event_study.py FOMC SPY,QQQ,GLD,USO [drift|fade] [2015:2022] [min_vol_mult]
     python events/event_study.py --selfcheck
+
+    min_vol_mult (E1c): filtra a eventos con |mov día| ≥ mult × vol20d. 0 = sin filtro.
 """
 from __future__ import annotations
 
@@ -72,16 +74,23 @@ MIN_TAIL_RATIO = 1.2     # ganancia media / |pérdida media| — la asimetría d
 
 
 def _forward_drift_returns(
-    df, event_dates: List[str], window_days: int, mode: str = "drift"
+    df, event_dates: List[str], window_days: int, mode: str = "drift",
+    min_vol_mult: float = 0.0,
 ) -> List[float]:
     """Por cada evento: retorno de `window_days` post-evento, con señal según `mode`.
 
     Entra al cierre del día del evento, sale `window_days` sesiones después.
     - mode="drift": sigue el movimiento del día del evento (continuación).
     - mode="fade":  apuesta contra el movimiento del día del evento (reversión).
+
+    `min_vol_mult` > 0 = filtro de MAGNITUD (E1c): solo opera eventos cuyo movimiento
+    del día supere `min_vol_mult` × vol diaria realizada de 20d previa. Regime-neutral
+    (auto-calibra por vol): prueba si el drift limpio vive solo en sorpresas GRANDES y
+    el ruido de días chicos es lo que contaminaba la regla fija de E1b.
     """
     idx = list(df.index)
     close = df["close"]
+    daily_ret = close.pct_change()
     direction = -1.0 if mode == "fade" else 1.0
     out: List[float] = []
     for ds in event_dates:
@@ -92,9 +101,16 @@ def _forward_drift_returns(
         if i == 0 or i + window_days >= len(idx):
             continue
         event_move = float(close.iloc[i] / close.iloc[i - 1] - 1)
-        fwd = float(close.iloc[i + window_days] / close.iloc[i] - 1)
         if event_move == 0:
             continue
+        if min_vol_mult > 0:
+            # vol de los 20d ANTERIORES al evento (sin lookahead): iloc[i-20:i]
+            trailing = daily_ret.iloc[max(0, i - 20):i].std()
+            if trailing is None or trailing != trailing or trailing == 0:  # NaN/0
+                continue
+            if abs(event_move) < min_vol_mult * float(trailing):
+                continue
+        fwd = float(close.iloc[i + window_days] / close.iloc[i] - 1)
         sign = 1.0 if event_move > 0 else -1.0
         out.append(direction * sign * fwd)
     return out
@@ -150,20 +166,22 @@ def gate_event(stats: Dict[str, float]) -> Dict[str, object]:
     return {"passed": passed, "reason": "clean" if passed else "failed: " + ", ".join(failed), "checks": checks}
 
 
-def run(event: str, symbols: List[str], windows=(1, 3, 5), years=(2022, 2025), mode="drift") -> None:
+def run(event: str, symbols: List[str], windows=(1, 3, 5), years=(2022, 2025), mode="drift",
+        min_vol_mult: float = 0.0) -> None:
     from backtesting.engine import load_bars
     dates = CALENDARS.get(event)
     if not dates:
         print(f"Evento desconocido: {event}. Conocidos: {list(CALENDARS)}", file=sys.stderr)
         raise SystemExit(2)
     start, end = date(years[0], 1, 1), date(years[1], 1, 1)
-    print(f"Event-study [{mode}]: {event} ({len(dates)} eventos) · {', '.join(symbols)} · ventanas {windows}d\n")
+    filt = f" · filtro |mov|≥{min_vol_mult}×vol20d" if min_vol_mult > 0 else ""
+    print(f"Event-study [{mode}]: {event} ({len(dates)} eventos) · {', '.join(symbols)} · ventanas {windows}d{filt}\n")
     for sym in symbols:
         df = load_bars(sym, start, end, "1d", source="yfinance")
         if df is None or df.empty:
             print(f"  {sym}: sin datos"); continue
         for w in windows:
-            rets = _forward_drift_returns(df, dates, w, mode)
+            rets = _forward_drift_returns(df, dates, w, mode, min_vol_mult)
             stats = event_study(rets)
             g = gate_event(stats)
             verdict = "PASS ✅" if g["passed"] else "FAIL ❌"
@@ -188,6 +206,19 @@ def _selfcheck() -> None:
 
     # Muestra chica → FAIL aunque sea positivo.
     assert gate_event(event_study([0.05, 0.04, 0.03]))["passed"] is False, "N chico debe fallar"
+
+    # Filtro de magnitud: descarta eventos de movimiento chico, sin lookahead.
+    import pandas as pd
+    prices = [100.0]
+    for k in range(30):
+        prices.append(prices[-1] * (1.002 if k % 2 else 0.999))  # vol chica pero >0
+    prices.append(prices[-1] * 1.05)       # día evento: salto grande (idx 31)
+    prices += [prices[-1] * 1.02, prices[-1] * 1.02, prices[-1] * 1.02]
+    idx = pd.bdate_range("2020-01-01", periods=len(prices))
+    df = pd.DataFrame({"close": prices}, index=idx)
+    ev = [idx[31].strftime("%Y-%m-%d")]
+    assert len(_forward_drift_returns(df, ev, 1, "drift", min_vol_mult=1.0)) == 1, "salto grande pasa filtro"
+    assert len(_forward_drift_returns(df, ev, 1, "drift", min_vol_mult=100.0)) == 0, "umbral alto descarta"
     print("selfcheck ok")
 
 
@@ -195,11 +226,13 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args == ["--selfcheck"]:
         _selfcheck()
-    elif len(args) in (2, 3, 4):
+    elif len(args) in (2, 3, 4, 5):
         mode = args[2] if len(args) >= 3 else "drift"
         # años como "2015:2022" (start inclusivo, end exclusivo) — para partir IS/OOS
-        years = tuple(int(y) for y in args[3].split(":")) if len(args) == 4 else (2022, 2025)
-        run(args[0], [s.strip().upper() for s in args[1].split(",")], years=years, mode=mode)
+        years = tuple(int(y) for y in args[3].split(":")) if len(args) >= 4 else (2022, 2025)
+        min_vol_mult = float(args[4]) if len(args) == 5 else 0.0
+        run(args[0], [s.strip().upper() for s in args[1].split(",")], years=years, mode=mode,
+            min_vol_mult=min_vol_mult)
     else:
         print(__doc__)
         raise SystemExit(2)

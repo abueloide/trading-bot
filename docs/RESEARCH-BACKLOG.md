@@ -28,11 +28,30 @@ el harness event; luego se le encolan E1/E2/E3 para grindear.
   eventos por símbolo para un OOS largo. Necesita histórico de earnings por símbolo (fuente
   aparte) + soporte de calendario **por-símbolo** en el harness (hoy `CALENDARS` es lista
   compartida por evento). PO-interactivo, no loop.
+- **E1c** — FOMC drift condicionado a magnitud de sorpresa (|mov|≥k×vol20d) → **HECHO ·
+  FAIL ❌** (2026-07-23, ver abajo).
 - **E1b** — SPY/QQQ post-FOMC drift **y** fade (mismo calendario verificado) → **HECHO ·
   FAIL ❌** (2026-07-22, ver abajo).
 - **E1** — GLD/USO en ventana FOMC/OPEC → **HECHO · FAIL ❌** (ver abajo).
 
+> **FOMC-equities agotado (3 variantes: E1b fija, E1c magnitud; E1 GLD fija).** El loop
+> NO debe generar más variantes sobre el calendario FOMC — es un catalizador de baja
+> frecuencia (≤79 fechas/9 años) y cualquier selector de evento thinnea la muestra bajo
+> el piso N=15. La siguiente hipótesis de selección-de-evento necesita un catalizador de
+> ALTA frecuencia (CPI, earnings, OpEx) → hoy BLOCKED-DATA en sandbox (ver E2/E3).
+
 ## Hecho
+
+### E1c — FOMC drift condicionado a magnitud  · HECHO · FAIL ❌ (2026-07-23)
+Rescate de E1b: filtrar a eventos con `|mov_día| ≥ 1.0×vol20d` (solo sorpresas grandes,
+auto-calibrado por vol → regime-neutral). **No limpió el edge; thinneó la muestra.** N
+cae a ~15-20 (roza el piso MIN_EVENTS=15) y el flip de régimen PERSISTE: hikes sigue
+fadeando (3d/5d negativos) incluso restringido a movimientos grandes. Solo 1 celda pasa
+(SPY 3d ZIRP) y ni coincide con los ganadores del baseline → azar de subconjunto. La
+dependencia de régimen es estructural, no ruido de días chicos. Familia FOMC-equities
+agotada en 3 variantes. No desplegada. Filtro `min_vol_mult` queda en el harness para
+catalizadores de alta frecuencia futuros. Postmortem:
+`docs/postmortems/2026-07-23-fomc-drift-magnitude-e1c.md`.
 
 ### E1b — SPY/QQQ post-FOMC drift+fade  · HECHO · FAIL ❌ (2026-07-22)
 El otro lado del evento de E1: índices de equity en la ventana FOMC (calendario ya
