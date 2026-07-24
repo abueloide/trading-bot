@@ -49,3 +49,46 @@ revierte en los días siguientes.
 2. ~~Verificar las 24 fechas 2022-24 contra la Fed.~~ ✅ 24/24 correctas.
 3. Definir regla ejecutable + sizing para long-shot (cuánto por evento).
 4. Paper valida cableado → luego el $5k real (gatillo de Luis).
+
+---
+
+## C2 — OpEx 1-day drift (SPY, QQQ) · ✅ CANDIDATA · pasa gate en AMBOS regímenes (2026-07-24)
+
+**Regla:** el día de vencimiento mensual de opciones (**3er viernes del mes**), al
+cierre, tomar posición **a favor** del movimiento del día (drift/continuación) en
+SPY y QQQ. Salir **1 sesión** después. El calendario es puro cómputo (3er viernes),
+no API → el loop autónomo lo drena en sandbox (a diferencia de CPI/earnings).
+
+**Por qué importa:** es la **primera hipótesis event-driven que cruza el gate en los
+DOS regímenes** (ZIRP/COVID 2015-21 *y* hikes 2022-24). Las 3 variantes FOMC murieron
+justo porque *ninguna celda* pasaba en ambos regímenes; aquí SPY/QQQ w=1d sí.
+
+**Números (drift, w=1d):**
+| Símbolo | OOS 2015-21 (N≈84) | IS 2022-24 (N≈35) |
+|---|---|---|
+| SPY | exp +0.15% · tail 1.27 · PASS | exp +0.34% · tail 1.96 · PASS |
+| QQQ | exp +0.26% · tail 1.87 · PASS | exp +0.24% · tail 1.86 · PASS |
+
+**Tesis:** cerca del vencimiento el gamma de dealers *pinnea* el precio; el flujo de
+cobertura residual del día OpEx **continúa ~1 sesión** antes de disiparse. Es
+microestructura (posicionamiento de dealers), no macro — por eso es más robusto al
+régimen que el FOMC. La disipación se ve en los datos: 3d/5d drift es fuerte solo en
+IS (rally 2022-24) y muere en OOS → efecto de régimen, se descarta; solo el w=1d
+sobrevive limpio.
+
+**Caveats honestos (por qué NO toca paper aún — es candidata débil, un peldaño BAJO C1):**
+- **Edge delgado:** +0.15–0.34%/evento, ~12 eventos/año = ~2–4% bruto anual. Sensible
+  a costos; falta sizing net-of-cost.
+- **hit rate ~49–55% (moneda al aire):** el edge vive en la asimetría de cola, no en
+  acertar dirección. Frágil.
+- **Breadth 2/3:** IWM falla tail en ambos regímenes. No es amplio.
+- **FALTA EL PLACEBO (lo que salvó/mató a C1):** aún no se corrió el control
+  vs. días random no-OpEx. Sin eso no sabemos si es efecto **específico de OpEx** o
+  mero momentum de 1 día genérico ya arbitrado. **Este es el killer test pendiente.**
+- Multiple-testing: 3 símbolos × 3 ventanas × 2 modos.
+
+**Siguientes pasos antes de paper (para veredicto semanal de Luis):**
+1. **Placebo/control:** 1d-drift en días random no-OpEx vs. días OpEx. Si el drift no
+   es mayor en OpEx → es momentum genérico, se archiva. (Igual que el placebo de C1.)
+2. Sizing net-of-cost para SPY/QQQ (spread+slippage cierre→cierre).
+3. Si sobrevive placebo → paper valida cableado.

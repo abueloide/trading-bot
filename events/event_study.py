@@ -62,8 +62,30 @@ FOMC_ANNOUNCEMENT_DATES = [
     "2024-09-18", "2024-11-07", "2024-12-18",
 ]
 
+def _third_fridays(start_year: int, end_year: int) -> List[str]:
+    """Vencimiento mensual de opciones = 3er viernes de cada mes. Puro, sin I/O.
+
+    Catalizador de ALTA frecuencia (12/año) y DETERMINISTA: se computa, no se
+    baja de ninguna API — por eso el loop autónomo SÍ lo puede drenar (a diferencia
+    de CPI/earnings, BLOCKED-DATA en sandbox). Si el 3er viernes es feriado
+    (p.ej. Good Friday), `_nearest_index` lo ajusta a la sesión real (±4 días).
+    """
+    from datetime import date as _date, timedelta as _td
+    out: List[str] = []
+    for y in range(start_year, end_year + 1):
+        for m in range(1, 13):
+            d = _date(y, m, 1)
+            # primer viernes: weekday() viernes == 4
+            first_friday = d + _td(days=(4 - d.weekday()) % 7)
+            third_friday = first_friday + _td(days=14)
+            out.append(third_friday.isoformat())
+    return out
+
+
 CALENDARS: Dict[str, List[str]] = {
     "FOMC": FOMC_ANNOUNCEMENT_DATES,
+    # OPEX = 3er viernes/mes, computado (no API). Alta frecuencia → drenable en loop.
+    "OPEX": _third_fridays(2015, 2024),
     # TODO Fase 1: CPI (mensual), OPEC (juntas), earnings por-símbolo (yfinance).
 }
 
@@ -219,6 +241,12 @@ def _selfcheck() -> None:
     ev = [idx[31].strftime("%Y-%m-%d")]
     assert len(_forward_drift_returns(df, ev, 1, "drift", min_vol_mult=1.0)) == 1, "salto grande pasa filtro"
     assert len(_forward_drift_returns(df, ev, 1, "drift", min_vol_mult=100.0)) == 0, "umbral alto descarta"
+
+    # OPEX: 3er viernes de cada mes, determinista. Casos verificados a mano.
+    tf = _third_fridays(2015, 2024)
+    assert len(tf) == 120, f"10 años × 12 meses = 120 vencimientos, no {len(tf)}"
+    assert "2015-01-16" in tf and "2024-12-20" in tf, "3er viernes ene-2015 / dic-2024"
+    assert "2020-04-17" in tf, "3er viernes abr-2020"
     print("selfcheck ok")
 
 

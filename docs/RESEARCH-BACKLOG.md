@@ -16,6 +16,11 @@ E1/E2/E3) la construye el PO en sesión interactiva, no el loop autónomo (es
 greenfield, no una variante de estrategia). El loop queda en hold hasta que exista
 el harness event; luego se le encolan E1/E2/E3 para grindear.
 
+- **E4** — OpEx (3er viernes/mes) drift/fade en SPY/QQQ/IWM → **HECHO · CANDIDATA ✅**
+  (2026-07-24, ver abajo). **Desbloqueó el nudo BLOCKED-DATA:** OpEx es catalizador de
+  ALTA frecuencia (120 eventos/10 años) pero su calendario **se computa** (3er viernes),
+  no se baja de BLS/FRED → el loop autónomo SÍ lo drena en sandbox. Primera hipótesis
+  event-driven que pasa el gate en AMBOS regímenes. No desplegada; falta placebo.
 - **E2** — drift direccional post-sorpresa CPI (SPY/QQQ) → **PENDIENTE · BLOCKED-DATA**.
   Necesita calendario CPI verificado en `CALENDARS`. El loop autónomo NO lo puede drenar:
   BLS/FRED/ALFRED devuelven 403/timeout desde el sandbox (WebFetch y egress general los
@@ -38,9 +43,24 @@ el harness event; luego se le encolan E1/E2/E3 para grindear.
 > NO debe generar más variantes sobre el calendario FOMC — es un catalizador de baja
 > frecuencia (≤79 fechas/9 años) y cualquier selector de evento thinnea la muestra bajo
 > el piso N=15. La siguiente hipótesis de selección-de-evento necesita un catalizador de
-> ALTA frecuencia (CPI, earnings, OpEx) → hoy BLOCKED-DATA en sandbox (ver E2/E3).
+> ALTA frecuencia. CPI/earnings siguen BLOCKED-DATA (ver E2/E3), **pero OpEx NO**: su
+> calendario es puro cómputo (3er viernes), no fetch → drenable en sandbox (ver E4).
 
 ## Hecho
+
+### E4 — OpEx (3er viernes) drift/fade en índices  · HECHO · CANDIDATA ✅ (2026-07-24)
+Primer catalizador de **alta frecuencia drenable en sandbox**: OpEx = 3er viernes/mes,
+calendario **computado** (`_third_fridays`, sin API) → 120 eventos/10 años. Corrido
+drift+fade × SPY/QQQ/IWM × 1/3/5d, split OOS 2015-21 (ZIRP/COVID) vs IS 2022-24 (hikes).
+**Fade muerto en todo.** 3d/5d drift = artefacto del rally de hikes (fuerte en IS, muerto
+en OOS) → descartado. **Pero SPY y QQQ w=1d drift pasan el gate-event en AMBOS regímenes**
+(SPY +0.15%→+0.34%, QQQ +0.26%→+0.24%; tails 1.27–1.96) — algo que NINGUNA variante FOMC
+logró. Tesis: gamma de dealers pinnea en vencimiento, el flujo residual continúa ~1 sesión
+y se disipa (por eso solo 1d sobrevive). Candidata **débil** (edge delgado ~2-4%/año bruto,
+hit ~50% = todo cola, breadth 2/3, IWM falla). **NO desplegada.** Killer test pendiente para
+veredicto semanal: **placebo vs días random no-OpEx** (¿es específico de OpEx o momentum 1d
+genérico?). Ficha completa: `docs/CANDIDATES.md` C2. Filtro/harness sin cambios salvo el
+calendario OPEX en `events/event_study.py`.
 
 ### E1c — FOMC drift condicionado a magnitud  · HECHO · FAIL ❌ (2026-07-23)
 Rescate de E1b: filtrar a eventos con `|mov_día| ≥ 1.0×vol20d` (solo sorpresas grandes,
