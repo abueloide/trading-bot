@@ -7,7 +7,31 @@ Método: `STRATEGY-METHOD.md`. Si la cola está vacía, el loop genera una idea 
 
 Estados: PENDIENTE · EN CURSO · HECHO (con veredicto).
 
-## Prioridad
+## Prioridad — carril COLA GORDA (long-shot de Luis)
+
+C2 ya está en paper. Lo que falta es lo que Luis realmente busca: **asimetría
+extrema** (1% de probabilidad, pago enorme), no edges de 1-3%/año. Criterio del
+carril: tail_ratio ALTO (≥3) importa más que hit rate; se acepta perder seguido.
+Datos: yfinance (gratis). Método/gate: `PLAN-event-driven.md`.
+
+### F1 — Rebote post-pánico  · PENDIENTE
+Tesis: tras una caída extrema de 1 día (SPY ≤ −3%, o ≤ −4%), el rebote a 1-10
+días tiene cola derecha gorda (liquidación forzada → sobre-venta). Eventos raros
+(N chico por diseño) pero es exactamente la forma de payoff que Luis quiere.
+- Símbolos: SPY/QQQ/IWM + high-beta (ARKK, SOXL si hay historia).
+- Ventanas: 1, 5, 10, 20d. Reportar tail_ratio y percentil 90 del retorno.
+- Placebo obligatorio: días random vs. días de pánico.
+
+### F2 — Explosión de volatilidad  · PENDIENTE
+Tesis: cuando el VIX salta >20% en un día, el movimiento subsecuente del índice
+tiene varianza brutal. Buscar la pata con cola derecha (no el promedio).
+- Datos: ^VIX + SPY por yfinance.
+
+### F3 — Continuación de gap extremo en earnings  · PENDIENTE
+Tesis: gaps >10% post-earnings continúan (underreaction en la cola).
+- BLOQUEADA por datos: necesita fechas de earnings verificadas (feed de pago).
+
+## Prioridad (histórico)
 
 **PIVOTE 2026-07-17 → event-driven.** El daily-bar long-only está agotado (H1-H5
 FAIL). El loop **NO debe generar más ideas daily-bar** (quemar Opus en pozo seco).
