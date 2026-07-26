@@ -87,8 +87,21 @@ sobrevive limpio.
   mero momentum de 1 día genérico ya arbitrado. **Este es el killer test pendiente.**
 - Multiple-testing: 3 símbolos × 3 ventanas × 2 modos.
 
+**PLACEBO: ✅ SOBREVIVE (2026-07-26).** 30 remuestreos de días random no-OpEx (mismo N)
+por celda. El drift de 1d en días random es **~0 o negativo en las 4 celdas** → el
+efecto es **específico de OpEx**, no momentum genérico de 1 día:
+
+| Celda | OpEx exp | Placebo medio | z | placebos ≥ real |
+|---|---|---|---|---|
+| SPY 2015-21 | +0.144% | −0.024% | +1.49 | 3/30 |
+| SPY 2022-24 | +0.305% | −0.035% | +1.57 | 1/30 |
+| QQQ 2015-21 | +0.251% | −0.076% | +2.74 | 0/30 |
+| QQQ 2022-24 | +0.186% | −0.005% | +0.74 | 8/30 (débil) |
+
+Es el **primer test-asesino que algo pasa en este proyecto** (mató a C1). Reserva
+honesta: 3/4 celdas fuertes, QQQ-IS floja (pudo ser azar); signo consistente en las 4.
+
 **Siguientes pasos antes de paper (para veredicto semanal de Luis):**
-1. **Placebo/control:** 1d-drift en días random no-OpEx vs. días OpEx. Si el drift no
-   es mayor en OpEx → es momentum genérico, se archiva. (Igual que el placebo de C1.)
+1. ~~**Placebo/control** vs. días random no-OpEx.~~ ✅ PASA (arriba).
 2. Sizing net-of-cost para SPY/QQQ (spread+slippage cierre→cierre).
 3. Si sobrevive placebo → paper valida cableado.
