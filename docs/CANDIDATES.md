@@ -101,7 +101,16 @@ efecto es **específico de OpEx**, no momentum genérico de 1 día:
 Es el **primer test-asesino que algo pasa en este proyecto** (mató a C1). Reserva
 honesta: 3/4 celdas fuertes, QQQ-IS floja (pudo ser azar); signo consistente en las 4.
 
+
+**COSTOS: ✅ SOBREVIVE (2026-07-26).** Neto de round-trip a 2/4/6 bps, positivo en
+las 4 celdas incluso en el escenario caro (6 bps): SPY +0.084%/+0.245% por evento
+(OOS/IS), QQQ +0.191%/+0.126% → **≈ +1.0% a +2.9% anual neto**.
+
+**Reserva de expectativa (importante):** ~1-3%/año neto sobre $5k = **$50-150/año**.
+C2 es un edge REAL pero PEQUEÑO y constante — NO es el long-shot de cola gorda que
+busca Luis. Decisión de si vale la pena desplegarlo es suya, no técnica.
+
 **Siguientes pasos antes de paper (para veredicto semanal de Luis):**
 1. ~~**Placebo/control** vs. días random no-OpEx.~~ ✅ PASA (arriba).
-2. Sizing net-of-cost para SPY/QQQ (spread+slippage cierre→cierre).
+2. ~~Sizing net-of-cost SPY/QQQ.~~ ✅ PASA (arriba).
 3. Si sobrevive placebo → paper valida cableado.
