@@ -432,7 +432,36 @@ def strategy_regime_trend_hold(
 
 # ---------------------------------------------------------- registry
 
+def strategy_opex_drift(df: pd.DataFrame) -> pd.DataFrame:
+    """C2 — OpEx 1-day drift, long-only leg (see docs/CANDIDATES.md).
+
+    Entra al cierre del 3er viernes del mes (vencimiento mensual de opciones)
+    SOLO si ese día cerró en verde; sale a la siguiente sesión. Tesis: el flujo
+    residual de cobertura de dealers continúa ~1 sesión antes de disiparse.
+
+    Por qué solo-largo: el ledger virtual no soporta cortos, y medido (2026-07-26)
+    la pata larga es la BUENA — hit 64-73% neto vs ~50% de la versión con cortos;
+    la pata corta arrastraba (QQQ 2022-24: −0.105%/evento).
+    """
+    sig = _empty_signals(df)
+    if len(df) < 2:
+        return sig
+    idx = pd.DatetimeIndex(df.index)
+    # 3er viernes = viernes (weekday 4) cuyo día del mes cae en 15..21
+    is_opex = (idx.weekday == 4) & (idx.day >= 15) & (idx.day <= 21)
+    up_day = df["close"] > df["close"].shift(1)
+    sig["entry"] = is_opex & up_day.to_numpy()
+    sig["exit"] = ~sig["entry"]  # hold exactamente una sesión
+    return sig
+
+
 STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
+    "opex_drift": {
+        "fn": strategy_opex_drift,
+        "type": "opex",
+        "max_hold_days": 1,
+        "description": "C2 — OpEx (3er viernes) 1-day drift, long-only",
+    },
     "rsi_mr": {
         "fn": strategy_rsi_mr_vix,
         "type": "mean_reversion",
@@ -515,3 +544,4 @@ def get_strategy(name: str) -> Dict[str, object]:
     if name not in STRATEGY_REGISTRY:
         raise KeyError(f"Unknown strategy: {name}. Available: {list(STRATEGY_REGISTRY)}")
     return STRATEGY_REGISTRY[name]
+

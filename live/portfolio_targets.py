@@ -167,3 +167,31 @@ def exit_signals(
         if len(sig) and bool(sig["exit"].iloc[-1]):
             out.append(sym)
     return out
+
+
+def event_candidates(
+    strategy_name: str,
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    exclude: Optional[set] = None,
+) -> List[Tuple[str, float, float]]:
+    """Símbolos cuya última barra dispara la entrada de una estrategia de evento.
+
+    Sin ranking (rank=0.0): en el carril-event el calendario decide, no un score
+    — todos los símbolos elegibles entran equal-weight el día del evento.
+    """
+    exclude = exclude or set()
+    fn = STRATEGY_REGISTRY[strategy_name]["fn"]
+    out: List[Tuple[str, float, float]] = []
+    for sym, df in bars_by_symbol.items():
+        if sym in exclude or not _usable(df):
+            continue
+        try:
+            sig = fn(df)
+        except Exception:
+            continue
+        if len(sig) == 0 or not bool(sig["entry"].iloc[-1]):
+            continue
+        price = float(df["close"].iloc[-1])
+        if price > 0:
+            out.append((sym, 0.0, price))
+    return sorted(out)

@@ -70,8 +70,6 @@ UNIVERSE = sp500_symbols()
 _EXTRA_SYMBOLS = list(
     dict.fromkeys(s for s in (BENCHMARK_SYMBOL, REBALANCE_REFERENCE) if s not in UNIVERSE)
 )
-FETCH_SYMBOLS = list(UNIVERSE) + _EXTRA_SYMBOLS
-
 STRATEGIES = [
     StrategyConfig("momentum_rotation", UNIVERSE, SLICE, max_positions=15),
     StrategyConfig("confirmed_mr", UNIVERSE, SLICE, max_positions=10),
@@ -79,6 +77,14 @@ STRATEGIES = [
     # 4th horse (2026-06-25): Donchian 20/10 breakout — a trend-following style
     # distinct from momentum (6m winners) and mean-reversion (oversold dips).
     StrategyConfig("donchian_breakout", UNIVERSE, SLICE, max_positions=10),
+    # C2 — OpEx 1d-drift (long-only). Universo fijo SPY/QQQ: es una anomalía de
+    # microestructura de índices, no un screen sobre el S&P 500. IVV (no SPY):
+    # SPY es el benchmark y la invariante dice que la vara no se opera; IVV sigue
+    # el mismo indice y replica el edge medido (+0.06%/+0.56% por evento).
+    # max_positions=6 (no 2) es SIZING, no un limite de nombres: el peso es
+    # slice/slots, y con 2 slots cada nombre pesaria 25% > cap duro de 20% y el
+    # risk gate VETA la orden (verificado 2026-07-26). Con 6 -> 16.7%, pasa.
+    StrategyConfig("opex_drift", ["IVV", "QQQ"], SLICE, max_positions=6),
     # NOTE: a 4th horse (momentum_news) was retired 2026-06-13. It paired the
     # momentum engine with an AlphaVantage NEWS_SENTIMENT veto, but the free tier
     # cannot serve it: NEWS_SENTIMENT returns 0 articles for a multi-ticker basket
@@ -87,6 +93,18 @@ STRATEGIES = [
     # momentum_rotation. The overlay code (live/news_overlay.py) stays for a future
     # revival with a per-ticker fetch + a paid/alternate news source.
 ]
+
+# Fetch = TODO símbolo que alguna estrategia pueda operar + los extras (benchmark,
+# calendario). Se computa DESPUÉS de STRATEGIES: una estrategia con universo propio
+# (p.ej. opex_drift → IVV/QQQ) quedaría sin barras si esto se derivara solo de
+# UNIVERSE — la misma clase de bug que dejó el alpha en null en junio 2026.
+FETCH_SYMBOLS = list(
+    dict.fromkeys(
+        list(UNIVERSE)
+        + [sym for cfg in STRATEGIES for sym in cfg.symbols]
+        + _EXTRA_SYMBOLS
+    )
+)
 
 
 def _is_first_trading_day_of_month(snapshot: Dict[str, pd.DataFrame]) -> bool:

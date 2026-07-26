@@ -266,3 +266,36 @@ def test_no_initial_state_starts_fresh(rising_bars):
     cfg = [StrategyConfig(strategy="confirmed_mr", symbols=["AAPL"], starting_cash=1000.0)]
     orch = Orchestrator(cfg, FakeBars(rising_bars), execu, initial_states=None)
     assert orch.portfolio("confirmed_mr").cash == 1000.0
+
+
+def _bars_ending(last_day: str, up: bool) -> pd.DataFrame:
+    """Serie que termina en `last_day`, con esa última barra verde o roja."""
+    idx = pd.bdate_range(end=pd.Timestamp(last_day), periods=60)
+    close = pd.Series(100.0, index=idx, dtype="float64")
+    close.iloc[-1] = 101.0 if up else 99.0
+    return pd.DataFrame({
+        "open": close, "high": close * 1.01, "low": close * 0.99,
+        "close": close, "volume": pd.Series(1_000_000, index=idx, dtype="float64"),
+    })
+
+
+def test_opex_buys_only_on_green_expiry_day():
+    # 2024-05-17 fue 3er viernes. Verde -> compra; rojo -> no.
+    ex = RecordingExecutor()
+    bars = KeyedBatchBars({"IVV": _bars_ending("2024-05-17", up=True),
+                           "QQQ": _bars_ending("2024-05-17", up=False)})
+    orch = Orchestrator([StrategyConfig("opex_drift", ["IVV", "QQQ"], 25_000.0, max_positions=6)],
+                        bars, ex)
+    orch.run_cycle()
+    bought = {b[0] for b in ex.buys}
+    assert bought == {"IVV"}, f"solo el verde entra, se compró: {bought}"
+
+
+def test_opex_does_not_buy_on_a_non_expiry_day():
+    ex = RecordingExecutor()
+    bars = KeyedBatchBars({"IVV": _bars_ending("2024-05-20", up=True),  # lunes
+                           "QQQ": _bars_ending("2024-05-20", up=True)})
+    orch = Orchestrator([StrategyConfig("opex_drift", ["IVV", "QQQ"], 25_000.0, max_positions=6)],
+                        bars, ex)
+    orch.run_cycle()
+    assert ex.buys == [], f"no debe operar fuera de OpEx: {ex.buys}"

@@ -37,3 +37,12 @@ def test_fetch_list_has_no_duplicates():
 def test_fetch_list_is_universe_plus_benchmark():
     # Every tradeable name is still fetched; the only addition is the yardstick.
     assert set(rts.UNIVERSE).issubset(set(rts.FETCH_SYMBOLS))
+
+
+def test_every_strategy_symbol_is_fetched():
+    # Regresión: una estrategia con universo propio (opex_drift → IVV/QQQ) debe
+    # tener barras. Si no se fetchea, nunca opera y falla en silencio.
+    fetched = set(rts.FETCH_SYMBOLS)
+    for cfg in rts.STRATEGIES:
+        missing = set(cfg.symbols) - fetched
+        assert not missing, f"{cfg.strategy} operaría {missing} sin barras"

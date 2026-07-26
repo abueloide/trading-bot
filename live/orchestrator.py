@@ -23,6 +23,7 @@ import pandas as pd
 from live.news_overlay import apply_news_overlay, fetch_sentiment
 from live.risk_gate import POSITION_HARD_CAP, SECTOR_HARD_CAP, gate_entry
 from live.portfolio_targets import (
+    event_candidates,
     breakout_candidates,
     exit_signals,
     momentum_top,
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 LOOKBACK_BARS = 260  # ~1y of daily bars; enough for 200d / momentum filters.
 
 # Default basket sizes per strategy type (number of equal-weight slots).
-DEFAULT_SLOTS = {"momentum": 15, "mean_reversion": 10, "breakout": 10}
+DEFAULT_SLOTS = {"momentum": 15, "mean_reversion": 10, "breakout": 10, "opex": 2}
 _FALLBACK_SLOTS = 5
 
 # When a momentum horse runs a news overlay, rank a deeper pool so vetoed names
@@ -117,6 +118,8 @@ class Orchestrator:
             vp = self._portfolios[strategy]
             if runner.strategy_type == "momentum":
                 self._run_momentum(runner, vp, local, is_rebalance_day)
+            elif runner.strategy_type == "opex":
+                self._run_slot_filler(runner, vp, local, event_candidates)
             elif runner.strategy_type == "breakout":
                 self._run_slot_filler(runner, vp, local, breakout_candidates)
             else:
