@@ -14,15 +14,9 @@ extrema** (1% de probabilidad, pago enorme), no edges de 1-3%/año. Criterio del
 carril: tail_ratio ALTO (≥3) importa más que hit rate; se acepta perder seguido.
 Datos: yfinance (gratis). Método/gate: `PLAN-event-driven.md`.
 
-### F1 — Rebote post-pánico  · PENDIENTE
-Tesis: tras una caída extrema de 1 día (SPY ≤ −3%, o ≤ −4%), el rebote a 1-10
-días tiene cola derecha gorda (liquidación forzada → sobre-venta). Eventos raros
-(N chico por diseño) pero es exactamente la forma de payoff que Luis quiere.
-- Símbolos: SPY/QQQ/IWM + high-beta (ARKK, SOXL si hay historia).
-- Ventanas: 1, 5, 10, 20d. Reportar tail_ratio y percentil 90 del retorno.
-- Placebo obligatorio: días random vs. días de pánico.
+### F1 — Rebote post-pánico  · HECHO · FAIL ❌ (2026-07-27, ver abajo)
 
-### F2 — Explosión de volatilidad  · PENDIENTE
+### F2 — Explosión de volatilidad  · PENDIENTE ← SIGUIENTE
 Tesis: cuando el VIX salta >20% en un día, el movimiento subsecuente del índice
 tiene varianza brutal. Buscar la pata con cola derecha (no el promedio).
 - Datos: ^VIX + SPY por yfinance.
@@ -71,6 +65,26 @@ el harness event; luego se le encolan E1/E2/E3 para grindear.
 > calendario es puro cómputo (3er viernes), no fetch → drenable en sandbox (ver E4).
 
 ## Hecho
+
+### F1 — Rebote post-pánico  · HECHO · FAIL ❌ (2026-07-27)
+Harness nuevo: `events/panic_study.py` (evento **condicional al precio**, no de
+calendario; señal fija LARGO, no signo-del-día). SPY ≤ −3%/−4% × SPY/QQQ/IWM/ARKK
+× w 1/5/10/20d, OOS 2015-21 vs IS 2022-24, con placebo de 500 muestras random.
+**La cola está del lado equivocado:** `tail_ratio` 0.30-1.17 en OOS (placebo
+~1.0-1.4) — la cola derecha existe (p90 +4…+19%) pero la izquierda es más gorda
+(maxL −20…−38%). **Cero celdas pasan en ambos regímenes** (única PASS en OOS,
+ARKK 20d, se voltea en IS). A −4% el trigger da N=11 en 7 años → bajo el piso
+MIN_EVENTS=15 antes de mirar un retorno.
+**Killer estructural:** los eventos NO son independientes — los 24 días de pánico
+del OOS son ~6 episodios (15 de ellos son COVID-2020); a −4%, 9 de 13 caen en
+mar-jun 2020; los 8 del IS son todos el bear de 2022. **N efectivo ≈ 5-6.** El
+piso por N crudo es inválido para eventos condicionales-al-precio (la vol se
+autocorrelaciona → los días se agrupan por construcción); hay que contar
+**episodios**. Familia "comprar la caída de 1 día" en daily bars: agotada. La vía
+viva de la tesis de asimetría sería condicionar a agotamiento del pánico, o
+comprar la cola con **opciones** (pérdida acotada por construcción, que el spot no
+da) — fuera del harness actual. No desplegada.
+Postmortem: `docs/postmortems/2026-07-27-rebote-post-panico-f1.md`.
 
 ### E4 — OpEx (3er viernes) drift/fade en índices  · HECHO · CANDIDATA ✅ (2026-07-24)
 Primer catalizador de **alta frecuencia drenable en sandbox**: OpEx = 3er viernes/mes,
