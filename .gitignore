@@ -19,3 +19,6 @@ backtesting/results/
 *.sqlite3
 *.csv.bak
 graphify-out/
+
+# Reactor de noticias: ledger y journal son estado vivo, no código
+data/news_reactor/
