@@ -16,14 +16,18 @@ Datos: yfinance (gratis). Método/gate: `PLAN-event-driven.md`.
 
 ### F1 — Rebote post-pánico  · HECHO · FAIL ❌ (2026-07-27, ver abajo)
 
-### F2 — Explosión de volatilidad  · PENDIENTE ← SIGUIENTE
-Tesis: cuando el VIX salta >20% en un día, el movimiento subsecuente del índice
-tiene varianza brutal. Buscar la pata con cola derecha (no el promedio).
-- Datos: ^VIX + SPY por yfinance.
+### F2 — Explosión de volatilidad  · HECHO · FAIL ❌ (2026-07-28, ver abajo)
 
 ### F3 — Continuación de gap extremo en earnings  · PENDIENTE
 Tesis: gaps >10% post-earnings continúan (underreaction en la cola).
 - BLOQUEADA por datos: necesita fechas de earnings verificadas (feed de pago).
+
+> **Carril COLA GORDA sin items drenables por el loop autónomo.** F1 y F2 muertas,
+> F3 BLOCKED-DATA. Ambas muertes convergen en lo mismo: en **spot** no se cobra una
+> expansión simétrica de varianza y la pérdida no está acotada. La forma de payoff
+> que pide la tesis (perder seguido, pagar enorme, riesgo acotado por construcción)
+> es un **straddle/strangle largo**. Abrir el carril de opciones es cambio de
+> alcance → **decisión de Luis**, no del loop.
 
 ## Prioridad (histórico)
 
@@ -65,6 +69,25 @@ el harness event; luego se le encolan E1/E2/E3 para grindear.
 > calendario es puro cómputo (3er viernes), no fetch → drenable en sandbox (ver E4).
 
 ## Hecho
+
+### F2 — Explosión de volatilidad (VIX spike)  · HECHO · FAIL ❌ (2026-07-28)
+Harness nuevo: `events/vix_study.py` (trigger ^VIX +20%/+12% diario, **ambas patas**
+largo y corto, **dedup por episodios** — lo que le faltó a F1). SPY/QQQ/IWM × w
+1/5/10/20d, OOS 2015-21 vs IS 2022-24, placebo de 500 muestras random.
+**Muestra sana esta vez** (118 días → 84 episodios en OOS, muy sobre el piso) y aun
+así **cero celdas pasan en ambos regímenes**. Dos killers:
+1. **El signo se invierte con el régimen.** ZIRP: largo 1d pasa en los 3 símbolos
+   (+0.33/+0.43/+0.37%, supera 97-99% del placebo). Hikes: pasa el **corto** en los
+   3 y el largo muere. El placebo confirma que el evento sí condiciona el movimiento
+   — pero la dirección la decide el régimen macro, no el evento (enfermedad de E1b/E1c).
+2. **El spike de VIX no es un evento, es un termómetro de régimen.** |mov| del evento
+   vs días random: OOS 1.30x (w=1d) pero IS **0.77x** — en vol alta el evento predice
+   un movimiento MENOR que un día al azar. La "explosión de varianza" solo existe
+   medida contra una base calmada.
+`tail_ratio` máximo del barrido = 2.35 (en celdas n≈7); con muestra real nunca pasa
+de ~1.6 → **el umbral ≥3 del carril nunca se alcanza**, y la cola gorda vuelve a
+estar a la izquierda (5d OOS: +1.79% a favor vs −2.63% en contra). No desplegada.
+Postmortem: `docs/postmortems/2026-07-28-explosion-vix-f2.md`.
 
 ### F1 — Rebote post-pánico  · HECHO · FAIL ❌ (2026-07-27)
 Harness nuevo: `events/panic_study.py` (evento **condicional al precio**, no de
