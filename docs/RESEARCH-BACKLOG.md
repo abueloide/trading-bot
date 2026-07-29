@@ -18,16 +18,18 @@ Datos: yfinance (gratis). Método/gate: `PLAN-event-driven.md`.
 
 ### F2 — Explosión de volatilidad  · HECHO · FAIL ❌ (2026-07-28, ver abajo)
 
-### F3 — Continuación de gap extremo en earnings  · PENDIENTE
-Tesis: gaps >10% post-earnings continúan (underreaction en la cola).
-- BLOQUEADA por datos: necesita fechas de earnings verificadas (feed de pago).
+### F3 — Continuación de gap extremo  · HECHO · FAIL ❌ (2026-07-29, ver abajo)
+**Se desbloqueó el BLOCKED-DATA** (el gap se computa del OHLC, no se fetchea) y aun
+así murió.
 
-> **Carril COLA GORDA sin items drenables por el loop autónomo.** F1 y F2 muertas,
-> F3 BLOCKED-DATA. Ambas muertes convergen en lo mismo: en **spot** no se cobra una
-> expansión simétrica de varianza y la pérdida no está acotada. La forma de payoff
-> que pide la tesis (perder seguido, pagar enorme, riesgo acotado por construcción)
-> es un **straddle/strangle largo**. Abrir el carril de opciones es cambio de
-> alcance → **decisión de Luis**, no del loop.
+> **Carril COLA GORDA agotado: F1, F2 y F3 muertas.** Las tres convergen en lo mismo:
+> en **spot** la cola derecha existe pero la izquierda pesa igual o más, porque la
+> pérdida no está acotada. `tail_ratio` máximo con muestra real en los tres estudios:
+> **1.86** — el umbral del carril es ≥3, y nunca se acercó. La forma de payoff que
+> pide la tesis (perder seguido, pagar enorme, riesgo acotado por construcción) es
+> una **opción larga** (straddle/strangle). Abrir el carril de opciones es cambio de
+> alcance → **decisión de Luis**, no del loop. Sin esa decisión, el loop no tiene
+> carril COLA GORDA que drenar.
 
 ## Prioridad (histórico)
 
@@ -69,6 +71,26 @@ el harness event; luego se le encolan E1/E2/E3 para grindear.
 > calendario es puro cómputo (3er viernes), no fetch → drenable en sandbox (ver E4).
 
 ## Hecho
+
+### F3 — Continuación de gap extremo  · HECHO · FAIL ❌ (2026-07-29)
+Harness nuevo: `events/gap_study.py`. **Desbloqueó el BLOCKED-DATA** con el truco de
+E4: el evento no se fetchea, se computa — el gap `open_t/close_{t-1}−1` es la huella
+observable del catalizador y sale del OHLC que ya tenemos. 32 single-names × 10 años,
+gaps ≥|8%| y ≥|12%|, ambas patas, modos cont/rev, w 1/5/10/20d, split OOS/IS, placebo.
+Muestra sanísima (1,140+ eventos; gap-UP con conc mensual 0.09-0.12 = episodios de
+verdad independientes, a diferencia de los gap-DOWN que son COVID-mar-2020, conc 0.40).
+**`gap UP ≥12% cont` pasaba el gate en AMBOS regímenes en 3 de 4 ventanas** (OOS +2.65%
+/ IS +3.32% a 20d, tails 1.31/1.57, placebo 80-97 pct) — se veía candidata. **Lo mató el
+jackknife por símbolo:** sin los top-3 contribuyentes la expectativa se vuelve NEGATIVA
+en ambos regímenes (−0.76% OOS / −0.82% IS). **TSLA sola es el 81% del edge en 5
+observaciones**; solo 9-13 de 23 símbolos tienen expectativa positiva.
+**Modo de falla NUEVO en el repo:** primer estudio *pooled cross-sectional* → juntar
+retornos de N símbolos fabrica expectativa cuando unos pocos nombres venían en su
+parábola de la década. Ni el placebo ni el split de régimen lo detectan (el placebo
+compara contra días random del mismo símbolo → la parábola está en ambos lados). Solo
+el jackknife lo ve → cableado en `event_study.jackknife_by_group` y auto-impreso en
+toda celda PASS. `tail_ratio` máximo del barrido = **1.86** (umbral del carril: ≥3).
+No desplegada. Postmortem: `docs/postmortems/2026-07-29-gap-continuation-f3.md`.
 
 ### F2 — Explosión de volatilidad (VIX spike)  · HECHO · FAIL ❌ (2026-07-28)
 Harness nuevo: `events/vix_study.py` (trigger ^VIX +20%/+12% diario, **ambas patas**

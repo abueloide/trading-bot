@@ -188,6 +188,28 @@ def gate_event(stats: Dict[str, float]) -> Dict[str, object]:
     return {"passed": passed, "reason": "clean" if passed else "failed: " + ", ".join(failed), "checks": checks}
 
 
+def jackknife_by_group(per_group: Dict[str, List[float]], k: int = 3) -> Dict[str, object]:
+    """Killer test para estudios POOLED entre símbolos: ¿sobrevive sin los top-k? Puro.
+
+    Lección de F3 (2026-07-29): juntar retornos de N símbolos en una sola
+    distribución fabrica edges. Un puñado de nombres en su parábola de la década
+    (TSLA, NVDA) carga toda la expectativa; el evento no predice nada, el nombre sí.
+    Si al quitar los k mayores contribuyentes la expectativa se cae, el "edge" es
+    idiosincrático, no una propiedad del evento.
+    """
+    contrib = sorted(per_group.items(), key=lambda kv: -sum(kv[1]))
+    dropped = {s for s, _ in contrib[:k]}
+    kept = [r for s, v in per_group.items() if s not in dropped for r in v]
+    full = event_study([r for v in per_group.values() for r in v])
+    return {
+        "dropped": [s for s, _ in contrib[:k]],
+        "full": full,
+        "jackknifed": event_study(kept),
+        "groups_positive": sum(1 for v in per_group.values() if v and st.mean(v) > 0),
+        "groups": len(per_group),
+    }
+
+
 def run(event: str, symbols: List[str], windows=(1, 3, 5), years=(2022, 2025), mode="drift",
         min_vol_mult: float = 0.0) -> None:
     from backtesting.engine import load_bars
@@ -247,6 +269,16 @@ def _selfcheck() -> None:
     assert len(tf) == 120, f"10 años × 12 meses = 120 vencimientos, no {len(tf)}"
     assert "2015-01-16" in tf and "2024-12-20" in tf, "3er viernes ene-2015 / dic-2024"
     assert "2020-04-17" in tf, "3er viernes abr-2020"
+
+    # Jackknife: un solo símbolo cargando el pool → sin él la expectativa se cae.
+    pool = {"HERO": [0.50, 0.40, 0.60], "A": [-0.01, 0.01], "B": [0.0, -0.02], "C": [-0.01, 0.0]}
+    jk = jackknife_by_group(pool, k=1)
+    assert jk["dropped"] == ["HERO"], jk["dropped"]
+    assert jk["full"]["expectancy_pct"] > 0 and jk["jackknifed"]["expectancy_pct"] < 0, jk
+    assert jk["groups_positive"] == 1 and jk["groups"] == 4, jk
+    # Edge parejo → sobrevive quitar al mayor.
+    even = {s: [0.02, 0.03] for s in "ABCDE"}
+    assert jackknife_by_group(even, k=1)["jackknifed"]["expectancy_pct"] > 0
     print("selfcheck ok")
 
 
