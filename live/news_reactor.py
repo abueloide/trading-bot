@@ -180,6 +180,12 @@ def run_once(executor=None, dry_run: bool = False) -> List[Decision]:
     load_dotenv(str(REPO / ".env"))
 
     seen = _load_seen()
+    # 1) Cerrar lo vencido ANTES de decidir: si no, el tope de concurrentes se
+    #    llena el primer día y el reactor deja de operar (bug medido 2026-07-30).
+    if executor is not None and not dry_run:
+        closed = executor.close_due(HOLD_DAYS)
+        if closed:
+            logger.info("cerradas por tiempo: %s", ", ".join(closed))
     items = fetch_recent()
     open_symbols: List[str] = []
     if executor is not None:
@@ -199,7 +205,10 @@ def run_once(executor=None, dry_run: bool = False) -> List[Decision]:
             open_symbols=open_symbols,
             n_open=len(open_symbols),
         )
-        if dec.action == "buy" and executor is not None and not dry_run:
+        if dec.action == "buy" and dry_run:
+            dec = Decision(**{**asdict(dec), "action": "skipped",
+                              "reason": "dry-run (no se ejecutó)"})
+        elif dec.action == "buy" and executor is not None:
             ok = executor.buy_dollars(symbol=dec.symbol, dollars=dec.dollars,
                                       hold_days=HOLD_DAYS, strategy="news_reactor")
             if ok:

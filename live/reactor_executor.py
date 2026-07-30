@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 REPO = Path(__file__).resolve().parent.parent
 STATE = REPO / "data" / "news_reactor" / "ledger.json"
+OPENED = REPO / "data" / "news_reactor" / "opened.json"  # símbolo -> fecha de entrada
 STARTING_CASH = 25_000.0
 
 
@@ -54,6 +55,44 @@ class ReactorExecutor:
         lots = self._vp.to_dict().get("lots", {})
         return [s for s, lot in lots.items() if float(lot.get("qty", 0)) > 0]
 
+    # ------------------------------------------------- salidas por tiempo
+    # El reactor DEBE cerrar lo suyo: `executor.check_time_exits()` está
+    # deliberadamente sin llamar en el sistema (ver run_trading_system.py), así
+    # que el time-exit registrado en el broker nunca dispara. Sin esto el reactor
+    # llena su tope de concurrentes el primer día y deja de operar para siempre
+    # (medido 2026-07-30: 5 posiciones abiertas, 72 catalizadores rechazados).
+    def _load_opened(self) -> dict:
+        if OPENED.exists():
+            try:
+                return json.loads(OPENED.read_text())
+            except Exception:
+                return {}
+        return {}
+
+    def _save_opened(self, opened: dict) -> None:
+        OPENED.parent.mkdir(parents=True, exist_ok=True)
+        tmp = OPENED.with_suffix(".tmp")
+        tmp.write_text(json.dumps(opened))
+        tmp.replace(OPENED)
+
+    def close_due(self, hold_days: int) -> List[str]:
+        """Cierra las posiciones cuya ventana de hold ya venció. Devuelve símbolos."""
+        opened = self._load_opened()
+        today = date.today()
+        closed: List[str] = []
+        for sym in list(self.open_symbols()):
+            iso = opened.get(sym)
+            if not iso:
+                # Sin fecha (posición previa al fix): trátala como vencida.
+                age = hold_days
+            else:
+                age = (today - date.fromisoformat(iso)).days
+            if age >= hold_days and self.sell_all(sym):
+                opened.pop(sym, None)
+                closed.append(sym)
+        self._save_opened(opened)
+        return closed
+
     # ---------------------------------------------------------- órdenes
     def buy_dollars(self, *, symbol: str, dollars: float, hold_days: int,
                     strategy: str = "news_reactor") -> bool:
@@ -78,6 +117,9 @@ class ReactorExecutor:
             logger.critical("LEDGER DRIFT news_reactor/%s: broker llenó, ledger rechazó: %s",
                             symbol, e)
             return False
+        opened = self._load_opened()
+        opened[symbol] = date.today().isoformat()
+        self._save_opened(opened)
         self._save()
         logger.info("BUY %s qty=%s @ %.2f (%s)", symbol, qty, price, strategy)
         return True
