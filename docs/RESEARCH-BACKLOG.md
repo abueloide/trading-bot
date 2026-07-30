@@ -22,14 +22,43 @@ Datos: yfinance (gratis). Método/gate: `PLAN-event-driven.md`.
 **Se desbloqueó el BLOCKED-DATA** (el gap se computa del OHLC, no se fetchea) y aun
 así murió.
 
-> **Carril COLA GORDA agotado: F1, F2 y F3 muertas.** Las tres convergen en lo mismo:
-> en **spot** la cola derecha existe pero la izquierda pesa igual o más, porque la
-> pérdida no está acotada. `tail_ratio` máximo con muestra real en los tres estudios:
-> **1.86** — el umbral del carril es ≥3, y nunca se acercó. La forma de payoff que
-> pide la tesis (perder seguido, pagar enorme, riesgo acotado por construcción) es
-> una **opción larga** (straddle/strangle). Abrir el carril de opciones es cambio de
-> alcance → **decisión de Luis**, no del loop. Sin esa decisión, el loop no tiene
-> carril COLA GORDA que drenar.
+### F4 — Cola gorda con pérdida acotada (stop duro)  · HECHO · FAIL ❌ (2026-07-30)
+Harness nuevo: `events/stop_study.py`. Probó lo barato antes de escalar a opciones:
+un **stop duro** acota la pérdida en spot, sin datos nuevos. Las tres familias ya
+estudiadas (pánico / VIX / gap-UP≥12%) × ventanas 5/10/20d × stops 3/5/8% × split
+OOS/IS, con ejecución honesta del stop sobre barras diarias (gap-through: si abre
+bajo el stop, sale al open) y **placebo con el mismo stop** (pooled para el gap).
+**Corrige la conclusión de F3:** el stop **sí** cruza el umbral ≥3 del carril —
+gap-UP 20d/stop-3% da tail **5.44** OOS / **4.88** IS. Spot **sí** puede producir la
+forma de payoff. Pero: (1) el `tail_ratio` resulta ser una **PERILLA** — mismo evento
+y ventana, moviendo solo el stop, el tail va de 5.44 (3%) a 1.93 (8%) mientras la
+expectativa se queda plana (±0.4pp) → **el gate `tail≥3` es gameable, cualquier
+hipótesis muerta lo cruza apretando el stop**; y (2) el **jackknife mata las celdas
+igual que en F3**: +1.81% → −1.15% sin TSLA/BA/STX, 8/23 símbolos positivos, y en IS
+la expectativa jackknifeada es negativa en las 9 celdas. VIX nunca pasa de tail 1.72
+y con stops 5-8% queda BAJO el placebo; pánico tiene 6-7 episodios en IS (bajo el
+piso de 15) → invalidable por muestra, como F1/F2.
+Postmortem: `docs/postmortems/2026-07-30-cola-gorda-stop-f4.md`.
+
+> **Carril COLA GORDA agotado: F1, F2, F3 y F4 muertas.** Las tres primeras
+> convergen en que la cola izquierda pesa igual o más que la derecha; F4 mostró que
+> acotar la izquierda con un stop **sí** produce `tail_ratio` ≥3 en spot — y que ahí
+> **no hay nada detrás**: la única fuente de cola derecha medida en todo el carril es
+> **idiosincrática** (3 nombres en su parábola), y el jackknife la desarma en ambos
+> regímenes.
+>
+> **Decisión pendiente de Luis (el loop no la toma):** abrir carril de **opciones**
+> (straddle/strangle) es cambio de alcance. Pero el argumento cambió con F4: una
+> opción larga **no crea edge**, compra la forma **pagando prima**. Si la única cola
+> derecha que hemos medido es idiosincrática y no persiste, comprar la forma es
+> comprar la prima. El carril opciones necesitaría un **edge nuevo**, no el mismo con
+> otro envoltorio. Sin esa decisión, el loop no tiene carril COLA GORDA que drenar.
+>
+> **Deuda de método que dejó F4 (para cuando se retome cualquier carril con stop):**
+> el gate `tail_ratio ≥ 3` está mal calibrado — mantenerlo como *descriptor de forma*
+> y mover el gate a **expectativa neta que bata el placebo (≥90 pct) + jackknife que
+> sobreviva**. Cualquier estudio con salida por stop debe correr su placebo **con el
+> mismo stop**.
 
 ## Prioridad (histórico)
 
