@@ -210,6 +210,47 @@ def jackknife_by_group(per_group: Dict[str, List[float]], k: int = 3) -> Dict[st
     }
 
 
+def jackknife_by_event(returns: List[float], k: int = 3) -> Dict[str, object]:
+    """¿El edge sobrevive sin los k eventos más grandes? Puro.
+
+    Hermano intra-símbolo de `jackknife_by_group`. F3 mató un edge pooled porque
+    3 SÍMBOLOS lo cargaban; el mismo fraude ocurre dentro de una sola serie cuando
+    3 EVENTOS de N cargan la expectativa. Con expectativas delgadas (~0.2%/evento)
+    bastan 2-3 días extremos para fabricar la media. Si al quitarlos la expectativa
+    se cae a ~0 o negativa, no hay edge: hay 3 días con suerte.
+    """
+    if not returns:
+        return {"dropped_k": 0, "full": event_study([]), "jackknifed": event_study([])}
+    keep = sorted(returns)[:max(0, len(returns) - k)]
+    return {
+        "dropped_k": min(k, len(returns)),
+        "full": event_study(returns),
+        "jackknifed": event_study(keep),
+    }
+
+
+def leave_one_year_out(by_year: Dict[str, List[float]]) -> Dict[str, object]:
+    """Expectativa quitando un año a la vez + cuántos años son positivos. Puro.
+
+    Un edge de evento real no debe depender de un año. Si al quitar UN año la
+    expectativa se vuelve negativa, el "edge" es ese año.
+    """
+    all_r = [r for v in by_year.values() for r in v]
+    worst_year, worst_exp = None, None
+    for y in by_year:
+        kept = [r for yy, v in by_year.items() if yy != y for r in v]
+        exp = event_study(kept)["expectancy_pct"]
+        if worst_exp is None or exp < worst_exp:
+            worst_year, worst_exp = y, exp
+    return {
+        "full_exp_pct": event_study(all_r)["expectancy_pct"],
+        "worst_drop_year": worst_year,
+        "worst_drop_exp_pct": worst_exp,
+        "years_positive": sum(1 for v in by_year.values() if v and st.mean(v) > 0),
+        "years": len(by_year),
+    }
+
+
 def run(event: str, symbols: List[str], windows=(1, 3, 5), years=(2022, 2025), mode="drift",
         min_vol_mult: float = 0.0) -> None:
     from backtesting.engine import load_bars

@@ -60,6 +60,36 @@ Postmortem: `docs/postmortems/2026-07-30-cola-gorda-stop-f4.md`.
 > sobreviva**. Cualquier estudio con salida por stop debe correr su placebo **con el
 > mismo stop**.
 
+### R1 — Re-auditoría de C2 con la barra nueva · HECHO · MIXTO ⚠️ (2026-07-31)
+Con el carril COLA GORDA agotado y sin carril nuevo (decisión de opciones es de
+Luis), el loop tomó la **deuda de método de F4** y la aplicó al único caballo que
+este carril tiene EN VIVO. Motivo: C2 pasó el gate el 07-24, y el método subió dos
+veces después (F3 jackknife, F4 placebo condicionado) — C2 nunca enfrentó ninguno.
+Tercer hueco encontrado leyendo el código: **C2 se gateó en su versión de dos patas,
+pero lo desplegado es solo la pata larga** → la muestra real es la MITAD (solo días
+verdes califican) y **QQQ-IS corre con n=14, bajo el piso MIN_EVENTS=15**.
+**IVV (la pata S&P en vivo) no sobrevive en OOS:** sin los top-3 eventos de 36 la
+expectativa es negativa (−0.026%) y contra un placebo que también compra solo días
+verdes cae en pct **68** → indistinguible de comprar cualquier día verde. El placebo
+viejo daba ~90 porque no condicionaba el control (justo el sesgo de F4).
+**QQQ sí sobrevive todo** (jk +0.260%, **7/7 años positivos**, pct 100) — primera y
+única celda del repo que aguanta un jackknife. C2 no muere; se parte en dos.
+**Despliegue NO tocado** (cambio en vivo = decisión de Luis). Recomendación: dejar
+IVV como **control interno**, no sacarlo — si replica a QQQ en vivo, la tesis de
+microestructura era mentira, y eso se aprende gratis.
+Harness: `events/opex_audit.py`; `jackknife_by_event` + `leave_one_year_out` en
+`event_study.py` (con tests). Postmortem: `docs/postmortems/2026-07-31-c2-opex-reaudit.md`.
+
+> **Regla de método nueva (generaliza F4):** si la regla condiciona la entrada
+> (día verde, stop, umbral de gap), **el placebo condiciona igual**. Un control sin
+> condicionar mide el condicionamiento, no el evento — e infla el percentil.
+
+> **Estado del loop:** sin carril PENDIENTE que drenar. COLA GORDA agotado (F1-F4),
+> E2/E3 BLOCKED-DATA, FOMC y daily-bar son pozos secos declarados. **Lo que el loop
+> puede hacer sin decisión de Luis es auditar lo desplegado contra la barra vigente**
+> (esto fue R1). Lo que necesita decisión: abrir carril opciones, o desbloquear
+> E2/E3 con datos.
+
 ## Prioridad (histórico)
 
 **PIVOTE 2026-07-17 → event-driven.** El daily-bar long-only está agotado (H1-H5

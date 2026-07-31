@@ -113,4 +113,37 @@ busca Luis. Decisión de si vale la pena desplegarlo es suya, no técnica.
 **Siguientes pasos antes de paper (para veredicto semanal de Luis):**
 1. ~~**Placebo/control** vs. días random no-OpEx.~~ ✅ PASA (arriba).
 2. ~~Sizing net-of-cost SPY/QQQ.~~ ✅ PASA (arriba).
-3. Si sobrevive placebo → paper valida cableado.
+3. Si sobrevive placebo → paper valida cableado. ✅ DESPLEGADA (commit `4b67a82`,
+   universo **IVV + QQQ**, pata **long-only**).
+
+---
+
+### RE-AUDITORÍA 2026-07-31 — la barra subió después de que C2 pasó ⚠️
+
+C2 se gateó antes de que existieran el jackknife (F3) y el placebo condicionado
+(F4), y **se gateó la versión de dos patas mientras lo que corre en paper es solo
+la pata larga**. Re-auditada la regla desplegada (`events/opex_audit.py`):
+
+**La muestra real es la mitad** (solo días verdes califican): QQQ IS pasa de n=36
+a **n=14 — bajo el piso `MIN_EVENTS=15`**. La expectativa por evento sube (la
+pata larga es la buena) pero el N se parte.
+
+| Celda (ticker desplegado) | n | exp | jk −top3 | años+ | placebo cond. | |
+|---|---|---|---|---|---|---|
+| IVV OOS 2015-21 | 36 | +0.124% | **−0.026%** | 6/7 | pct **68** | ❌ |
+| IVV IS 2022-24 | 16 | +0.667% | +0.358% | 3/3 | pct 100 | ✅ |
+| QQQ OOS 2015-21 | 35 | +0.426% | +0.260% | **7/7** | pct 100 | ✅ |
+| QQQ IS 2022-24 | **14** | +0.727% | +0.291% | 3/3 | pct 98 | ⚠️ n<15 |
+
+- **IVV-OOS no sobrevive:** sin los 3 mejores eventos de 36 la expectativa es
+  negativa, y contra un control que también compra solo días verdes cae en el
+  percentil 68 → **indistinguible de comprar cualquier día verde y salir mañana**.
+  El placebo original daba ~90 porque no condicionaba el control (sesgo de F4).
+- **QQQ es la celda más sólida del repo:** sobrevive jackknife, positiva 7/7 años,
+  percentil 100. Único hallazgo del proyecto que aguanta un jackknife.
+
+**C2 NO está muerta y NO se tocó el despliegue.** Decisión abierta para Luis:
+sacar IVV del universo, o dejarlo como **control interno** (si IVV replica a QQQ
+en vivo, la tesis de microestructura específica era mentira). Recomendación:
+dejarlo como control — no cuesta nada y vale más como control que como caballo.
+Detalle: `docs/postmortems/2026-07-31-c2-opex-reaudit.md`.
