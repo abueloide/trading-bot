@@ -4,9 +4,8 @@ Configuration File — US-stocks Trading System v2.
 
 Single source of truth for:
 - Alpaca API credentials and trading config
-- SIGNAL_WEIGHTS (definitive composite signal weights)
 - RISK_CONFIG (definitive risk parameters)
-- Crowding / anti-herding (HERD-001) preserved from v1
+- Anti-herding (HERD-001) preserved from v1
 - SQLite database path (replaces PostgreSQL from v1)
 - Feature flags
 """
@@ -72,17 +71,6 @@ ALPACA_CONFIG: Dict[str, Any] = {
 }
 
 
-def get_api_credentials() -> Dict[str, str]:
-    """Compatibility shim: legacy code calls this for Binance creds."""
-    return {
-        "ALPACA_API_KEY": ALPACA_API_KEY,
-        "ALPACA_SECRET_KEY": ALPACA_SECRET_KEY,
-        # Aliases retained for any v1 code path not yet migrated.
-        "BINANCE_API": ALPACA_API_KEY,
-        "BINANCE_SECRET": ALPACA_SECRET_KEY,
-    }
-
-
 # =============================================================================
 # DATA COLLECTION CONFIGURATION
 # =============================================================================
@@ -128,24 +116,6 @@ SIGNAL_TIMEOUT_MINUTES = 60
 
 
 # =============================================================================
-# DEFINITIVE COMPOSITE SIGNAL WEIGHTS  (Section 4 of the v2 spec)
-# These REPLACE the legacy 35/25/20/15/5 scheme. Total must sum to 1.00.
-# =============================================================================
-
-SIGNAL_WEIGHTS: Dict[str, float] = {
-    "technical_score":     0.25,
-    "volume_confirmation": 0.15,
-    "regime_alignment":    0.10,
-    "crowding_safety":     0.10,
-    "risk_reward":         0.05,
-    "smart_money_signal":  0.15,
-    "news_sentiment":      0.10,
-    "macro_regime":        0.10,
-}
-assert abs(sum(SIGNAL_WEIGHTS.values()) - 1.0) < 1e-6, "SIGNAL_WEIGHTS must sum to 1.0"
-
-
-# =============================================================================
 # RISK MANAGEMENT (DEFINITIVE — Section 6 of the v2 spec)
 # =============================================================================
 
@@ -163,6 +133,11 @@ RISK_CONFIG: Dict[str, Any] = {
     "max_sector_exposure_pct": 0.40,
     "min_cash_reserve_pct": 0.20,
     "max_cash_reserve_pct": 0.50,
+
+    # Risk Gate (segunda opinión que RECHAZA, no recorta) — decisión Luis 2026-07-07.
+    # Más estricto que el sizing base: éste rechaza la orden en lugar de recortarla.
+    "gate_position_cap": 0.20,               # rechazo si la posición > 20% del equity
+    "gate_sector_cap": 0.40,                 # rechazo si el sector > 40% del equity
 
     # Circuit breakers
     "max_daily_loss_pct": 0.05,
@@ -190,50 +165,7 @@ RISK_CONFIG: Dict[str, Any] = {
 # HERD-001 MARKET CROWDING DETECTION — preserved from v1
 # =============================================================================
 
-ENABLE_CROWDING_DETECTION = os.getenv("ENABLE_CROWDING_DETECTION", "true").lower() == "true"
 ENABLE_ANTI_HERDING = os.getenv("ENABLE_ANTI_HERDING", "true").lower() == "true"
-
-CROWDING_CONFIG: Dict[str, Any] = {
-    "correlation_analysis": {
-        "enabled": True,
-        "correlation_window": 100,
-        "correlation_threshold": 0.7,
-        "cross_asset_correlation_weight": 0.4,
-    },
-    "sentiment_analysis": {
-        "enabled": True,
-        "sentiment_threshold": 0.7,
-        "extreme_rsi_threshold": 80,
-        "fear_greed_weight": 0.3,
-        "momentum_alignment_weight": 0.4,
-    },
-    "volume_analysis": {
-        "enabled": True,
-        "volume_spike_threshold": 2.0,
-        "volume_trend_window": 20,
-        "burst_activity_threshold": 3.0,
-    },
-    "trade_crowding": {
-        "enabled": True,
-        "order_book_clustering_threshold": 0.7,
-        "directional_bias_threshold": 0.8,
-        "size_concentration_threshold": 0.6,
-        "timing_correlation_window": 50,
-    },
-    "responsibility_scoring": {
-        "market_weight": 0.6,
-        "trade_weight": 0.4,
-        "confidence_adjustment": True,
-        "regime_adjustment": True,
-    },
-}
-
-CROWDING_THRESHOLDS = {
-    "extreme_crowding": 0.85,    # block
-    "high_crowding": 0.6,        # reduce size
-    "moderate_crowding": 0.4,    # delay
-    "low_crowding": 0.2,
-}
 
 # NOTE: TIMING_DECORRELATION removed in v2 — irrelevant for daily stock scans.
 ANTI_HERDING_CONFIG: Dict[str, Any] = {
@@ -253,14 +185,6 @@ ANTI_HERDING_CONFIG: Dict[str, Any] = {
         "low_volatility_multiplier": 1.1,
         "normal_market_multiplier": 0.8,
     },
-}
-
-CROWDING_PERFORMANCE_CONFIG = {
-    "analysis_cache_ttl": 300,
-    "max_cache_size": 100,
-    "analysis_timeout_seconds": 5,
-    "fallback_on_timeout": True,
-    "fallback_responsibility_score": 0.5,
 }
 
 
@@ -296,8 +220,6 @@ DB_LOGGING_CONFIG = {
 # =============================================================================
 
 ENABLE_REGIME_DETECTION = os.getenv("ENABLE_REGIME_DETECTION", "true").lower() == "true"
-ENABLE_MICROSTRUCTURE = os.getenv("ENABLE_MICROSTRUCTURE", "true").lower() == "true"
-ENABLE_CRISIS_DETECTION = os.getenv("ENABLE_CRISIS_DETECTION", "true").lower() == "true"
 
 REGIME_CONFIG = {
     "enabled": ENABLE_REGIME_DETECTION,
@@ -312,38 +234,6 @@ REGIME_CONFIG = {
     "regime_confidence_threshold": 0.7,
     "regime_persistence_periods": 5,
     "update_interval": 3600,
-}
-
-CRISIS_CONFIG = {
-    "enabled": ENABLE_CRISIS_DETECTION,
-    "check_interval": 300,
-    "auto_shutdown": True,
-    "flash_crash_detection": {
-        "price_drop_threshold": 0.10,
-        "time_window_minutes": 15,
-        "volume_spike_threshold": 5.0,
-    },
-    "liquidity_crisis_detection": {
-        "bid_ask_spread_threshold": 0.005,
-        "market_impact_threshold": 0.01,
-    },
-    "volatility_crisis_detection": {
-        "volatility_spike_threshold": 3.0,
-        "volatility_persistence_periods": 3,
-    },
-}
-
-MICROSTRUCTURE_CONFIG = {
-    # Alpaca free tier is L1 only — depth-based metrics use fallbacks.
-    "order_book_depth_levels": 1,
-    "trade_flow_analysis_window": 300,
-    "market_impact_estimation": True,
-    "liquidity_metrics": {
-        "bid_ask_spread": True,
-        "effective_spread": True,
-        "price_impact": True,
-        "order_book_imbalance": True,
-    },
 }
 
 MANIPULATION_CONFIG = {
@@ -390,45 +280,6 @@ NEWS_CONFIG: Dict[str, Any] = {
     "min_impact_magnitude": 0.6,
     "min_confidence": 0.7,
     "narrative_window_days": 30,
-}
-
-
-# =============================================================================
-# BINANCE (CRYPTO) CONFIGURATION
-# =============================================================================
-
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
-BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
-BINANCE_TESTNET = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
-ENABLE_CRYPTO = os.getenv("ENABLE_CRYPTO", "false").lower() == "true"
-
-CRYPTO_CONFIG: Dict[str, Any] = {
-    "enabled": ENABLE_CRYPTO,
-    "api_key": BINANCE_API_KEY,
-    "secret_key": BINANCE_SECRET_KEY,
-    "testnet": BINANCE_TESTNET,
-    "max_position_pct": 0.20,           # max 20% of crypto allocation per coin
-    "default_quote_asset": "USDT",
-    "scan_interval": 300,               # 5 min (crypto is 24/7)
-}
-
-
-# =============================================================================
-# GEOPOLITICAL ENGINE — Phase B
-# =============================================================================
-
-ENABLE_GEOPOLITICAL = os.getenv("ENABLE_GEOPOLITICAL", "false").lower() == "true"
-
-GEOPOLITICAL_CONFIG: Dict[str, Any] = {
-    "enabled": ENABLE_GEOPOLITICAL,
-    "claude_max_calls_per_hour": 20,
-    "event_lookback_hours": 48,
-    "regime_hold_hours": 24,
-    "rebalance_cooldown_hours": 24,
-    "min_events_for_regime_change": 2,
-    "tail_event_override": True,
-    "fmp_api_key": os.getenv("FMP_API_KEY", "demo"),
-    "banxico_token": os.getenv("BANXICO_TOKEN", ""),
 }
 
 
@@ -498,7 +349,6 @@ FEATURE_FLAGS: Dict[str, bool] = {
     "enable_trading": os.getenv("ENABLE_TRADING", "true").lower() == "true",
     "enable_stop_losses": True,
     "enable_take_profits": True,
-    "enable_herd001": ENABLE_CROWDING_DETECTION,
     "enable_market_herding_analysis": True,
     "enable_trade_crowding_analysis": True,
     "enable_position_sizing_adjustment": True,
@@ -507,12 +357,8 @@ FEATURE_FLAGS: Dict[str, bool] = {
     "enable_analytics": True,
     "enable_performance_tracking": True,
     "enable_regime_detection": ENABLE_REGIME_DETECTION,
-    "enable_crisis_detection": ENABLE_CRISIS_DETECTION,
-    "enable_microstructure_analysis": ENABLE_MICROSTRUCTURE,
     "enable_alternative_data": ENABLE_ALTERNATIVE_DATA,
     "enable_news_intelligence": ENABLE_NEWS_INTELLIGENCE,
-    "enable_geopolitical": ENABLE_GEOPOLITICAL,
-    "enable_crypto": ENABLE_CRYPTO,
     "enable_debug_mode": os.getenv("DEBUG_MODE", "false").lower() == "true",
     "enable_verbose_logging": os.getenv("VERBOSE_LOGGING", "false").lower() == "true",
 }
@@ -547,26 +393,12 @@ def get_trading_config() -> Dict[str, Any]:
     }
 
 
-def get_herd001_config() -> Dict[str, Any]:
-    return {
-        "enabled": ENABLE_CROWDING_DETECTION,
-        "crowding_config": CROWDING_CONFIG,
-        "thresholds": CROWDING_THRESHOLDS,
-        "anti_herding_config": ANTI_HERDING_CONFIG,
-        "performance_config": CROWDING_PERFORMANCE_CONFIG,
-    }
-
-
 def get_database_config() -> Dict[str, Any]:
     return {
         "enabled": ENABLE_DATABASE,
         "type": DB_TYPE,
         "path": DB_PATH,
     }
-
-
-def get_signal_weights() -> Dict[str, float]:
-    return dict(SIGNAL_WEIGHTS)
 
 
 def get_risk_config() -> Dict[str, Any]:

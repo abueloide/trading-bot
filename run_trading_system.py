@@ -1,342 +1,232 @@
 #!/usr/bin/env python3
-"""
-Complete Trading System Runner
-Runs trading bot with Telegram monitoring and historical data integration
-"""
+"""Run the paper horse race: 3 backtested strategies, one paper account.
 
-import asyncio
+Universe = the full static S&P 500 snapshot (no runtime network for membership;
+see sp500_constituents.py). Bars are downloaded ONCE in a batch and reused for
+the cycle, the monthly-rebalance check, and end-of-run marks.
+"""
+from __future__ import annotations
+
 import logging
-import signal
-import sys
-import time
-import threading
-from datetime import datetime
-from typing import Optional
+import os
+from datetime import date
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
-# Setup logging
+import pandas as pd
+
+from dotenv import load_dotenv
+
+from executor import Executor
+from live.benchmark import compute_benchmark
+from live.equity_snapshot import append_snapshot, load_snapshots
+from live.ledger_store import load_ledgers, save_ledgers
+from live.risk_metrics import compute_risk_metrics, format_risk_table
+from live.live_executor_adapter import LiveExecutorAdapter
+from live.orchestrator import LOOKBACK_BARS, Orchestrator, StrategyConfig
+from live.yfinance_bars import CachedBars, YFinanceBars, drop_in_progress_bars
+from live.horse_race_report import build_report, format_table
+from stock_universe import sp500_symbols
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("horse_race")
 
-class TradingSystemManager:
-    """Manages the complete trading system"""
-    
-    def __init__(self):
-        self.trading_bot = None
-        self.telegram_bot = None
-        self.historical_downloader = None
-        self.is_running = False
-        self.trading_thread = None
-        self.telegram_thread = None
-        
-        # Setup signal handlers
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-    
-    def _signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
-        logger.info(f"📡 Received signal {signum}, shutting down gracefully...")
-        self.shutdown()
-        sys.exit(0)
-    
-    async def initialize_components(self):
-        """Initialize all system components"""
-        try:
-            logger.info("🚀 Initializing Enhanced Trading System...")
-            
-            # 1. Initialize Trading Bot
-            logger.info("🤖 Initializing trading bot...")
-            from trading_bot import TradingBot
-            self.trading_bot = TradingBot(paper_trading=True)
-            logger.info("✅ Trading bot initialized")
-            
-            # 2. Initialize Telegram Bot
-            logger.info("📱 Initializing Telegram bot...")
-            try:
-                from enhanced_telegram_bot import EnhancedTelegramBot
-                self.telegram_bot = EnhancedTelegramBot()
-                logger.info("✅ Telegram bot initialized")
-            except Exception as e:
-                logger.warning(f"Telegram bot initialization failed: {e}")
-                logger.warning("📱 Continuing without Telegram monitoring...")
-            
-            # 3. Historical data: handled by Alpaca historical bars in v2; no
-            # separate downloader needed. The backtesting engine fetches its
-            # own data from Alpaca / yfinance fallback on demand.
-            self.historical_downloader = None
-            
-            logger.info("🎉 All components initialized successfully!")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Component initialization failed: {e}")
-            return False
-    
-    async def check_historical_data(self):
-        """No-op in v2: historical bars are fetched lazily from Alpaca."""
-        try:
-            from stock_universe import TRADING_PRESETS
-            preset = "BALANCED"
-            symbols = TRADING_PRESETS[preset]["symbols"]
-            logger.info(f"Universe: {preset} preset, {len(symbols)} symbols")
-        except Exception as e:
-            logger.error(f"Universe load failed: {e}")
-    
-    def start_trading_bot(self):
-        """Start trading bot in continuous mode"""
-        try:
-            logger.info("🤖 Starting trading bot...")
-            
-            def trading_loop():
-                cycle_count = 0
-                last_telegram_update = time.time()
-                
-                while self.is_running:
-                    try:
-                        cycle_count += 1
-                        logger.info(f"📊 Trading cycle #{cycle_count} - {datetime.now().strftime('%H:%M:%S')}")
-                        
-                        # Run trading cycle
-                        result = self.trading_bot.run_trading_cycle()
-                        
-                        # Log result
-                        signal_action = result.get('signal', {}).get('action', 'UNKNOWN')
-                        logger.info(f"✅ Cycle completed: {signal_action}")
-                        
-                        # Send Telegram update every 10 cycles (10 minutes)
-                        if self.telegram_bot and (time.time() - last_telegram_update) > 600:
-                            try:
-                                asyncio.create_task(self._send_telegram_update(result))
-                                last_telegram_update = time.time()
-                            except Exception as e:
-                                logger.warning(f"Telegram update failed: {e}")
-                        
-                        # Wait 60 seconds
-                        for _ in range(60):
-                            if not self.is_running:
-                                break
-                            time.sleep(1)
-                        
-                    except Exception as e:
-                        logger.error(f"❌ Trading cycle error: {e}")
-                        time.sleep(30)  # Wait 30 seconds on error
-                
-                logger.info("🤖 Trading bot stopped")
-            
-            self.trading_thread = threading.Thread(target=trading_loop, daemon=True)
-            self.trading_thread.start()
-            logger.info("✅ Trading bot started")
-            
-        except Exception as e:
-            logger.error(f"Failed to start trading bot: {e}")
-    
-    async def start_telegram_bot(self):
-        """Start Telegram bot"""
-        try:
-            if not self.telegram_bot:
-                logger.warning("📱 Telegram bot not available")
-                return
-            
-            logger.info("📱 Starting Telegram bot...")
-            
-            # Send startup notification
-            await self._send_startup_notification()
-            
-            # Start Telegram bot in background
-            def telegram_loop():
-                try:
-                    asyncio.run(self.telegram_bot.start_bot())
-                except Exception as e:
-                    logger.error(f"Telegram bot crashed: {e}")
-            
-            self.telegram_thread = threading.Thread(target=telegram_loop, daemon=True)
-            self.telegram_thread.start()
-            logger.info("✅ Telegram bot started")
-            
-        except Exception as e:
-            logger.error(f"Failed to start Telegram bot: {e}")
-    
-    async def _send_startup_notification(self):
-        """Send startup notification to Telegram"""
-        try:
-            if not self.telegram_bot:
-                return
-            
-            startup_message = f"""
-🚀 **Enhanced Trading Bot Started**
+SLICE = 25_000.0  # virtual cash per strategy (paper) — 4 horses × $25k = $100k
+STATE_PATH = Path("data/ledgers/state.json")
+EQUITY_CURVE_PATH = Path("data/ledgers/equity_curve.jsonl")
+REBALANCE_REFERENCE = "SPY"  # market-calendar anchor for the monthly rebalance
+BENCHMARK_SYMBOL = "SPY"  # buy-and-hold yardstick for the alpha column
+# Inception of the clean $25k×N epoch: the ledgers were reset to $25k and the
+# Alpaca paper account flattened when the 4th horse (donchian_breakout) joined,
+# so all four read 0.00% on 2026-06-25 (see scripts/reset_race.py + cron.log).
+# Alpha is measured from here so the benchmark covers the same window as the
+# live ledgers.
+RACE_INCEPTION = date(2026, 6, 25)
 
-🕒 **Time**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-🛡️ **Mode**: Safe Paper Trading
-🧠 **Intelligence**: All systems active
-📊 **Database**: Connected
-📱 **Telegram**: Monitoring active
+# Risk overlay tuned for a diversified equal-weight horse race: many small
+# equal-weight slots (momentum 15, MR 10), near-full deployment, no sector cap
+# (this is a pure strategy comparison; a sector overlay is a separate concern).
+HORSE_RISK_CONFIG = {
+    "max_open_positions": 50,
+    "min_cash_reserve_pct": 0.0,
+    "max_cash_reserve_pct": 0.05,
+    "max_position_pct": 0.15,
+    "max_sector_exposure_pct": 1.0,
+}
 
-✅ **System Status**: Operational
-🤖 **Ready for trading cycles**
+# The full S&P 500 universe feeds every strategy; each builds its own basket.
+UNIVERSE = sp500_symbols()
 
-Use /status for detailed information.
-            """
-            
-            # This would send the actual message
-            logger.info("📱 Startup notification sent to Telegram")
-            
-        except Exception as e:
-            logger.error(f"Failed to send startup notification: {e}")
-    
-    async def _send_telegram_update(self, trading_result):
-        """Send periodic update to Telegram"""
-        try:
-            if not self.telegram_bot:
-                return
-            
-            signal_data = trading_result.get('signal', {})
-            action = signal_data.get('action', 'UNKNOWN')
-            confidence = signal_data.get('confidence', 0)
-            
-            update_message = f"""
-📊 **Trading Update**
+# Symbols fetched in the batch = the tradeable universe PLUS the benchmark /
+# rebalance yardstick (SPY). SPY is NOT an S&P 500 constituent, so without this
+# it was never in the snapshot and compute_benchmark() silently returned None on
+# every run (alpha_pct: null in the equity curve, alpha column dropped from the
+# report). The orchestrator only ever requests its own strategy symbols from the
+# cache, so SPY's bars feed the benchmark and the rebalance calendar without ever
+# becoming a tradeable position.
+_EXTRA_SYMBOLS = list(
+    dict.fromkeys(s for s in (BENCHMARK_SYMBOL, REBALANCE_REFERENCE) if s not in UNIVERSE)
+)
+STRATEGIES = [
+    StrategyConfig("momentum_rotation", UNIVERSE, SLICE, max_positions=15),
+    StrategyConfig("confirmed_mr", UNIVERSE, SLICE, max_positions=10),
+    StrategyConfig("rsi_mr", UNIVERSE, SLICE, max_positions=10),
+    # 4th horse (2026-06-25): Donchian 20/10 breakout — a trend-following style
+    # distinct from momentum (6m winners) and mean-reversion (oversold dips).
+    StrategyConfig("donchian_breakout", UNIVERSE, SLICE, max_positions=10),
+    # C2 — OpEx 1d-drift (long-only). Universo fijo SPY/QQQ: es una anomalía de
+    # microestructura de índices, no un screen sobre el S&P 500. IVV (no SPY):
+    # SPY es el benchmark y la invariante dice que la vara no se opera; IVV sigue
+    # el mismo indice y replica el edge medido (+0.06%/+0.56% por evento).
+    # max_positions=6 (no 2) es SIZING, no un limite de nombres: el peso es
+    # slice/slots, y con 2 slots cada nombre pesaria 25% > cap duro de 20% y el
+    # risk gate VETA la orden (verificado 2026-07-26). Con 6 -> 16.7%, pasa.
+    StrategyConfig("opex_drift", ["IVV", "QQQ"], SLICE, max_positions=6),
+    # NOTE: a 4th horse (momentum_news) was retired 2026-06-13. It paired the
+    # momentum engine with an AlphaVantage NEWS_SENTIMENT veto, but the free tier
+    # cannot serve it: NEWS_SENTIMENT returns 0 articles for a multi-ticker basket
+    # (and "Invalid inputs" past ~15 tickers), so fetch_sentiment always came back
+    # empty and the overlay was a permanent no-op — momentum_news was byte-for-byte
+    # momentum_rotation. The overlay code (live/news_overlay.py) stays for a future
+    # revival with a per-ticker fetch + a paid/alternate news source.
+]
 
-🎯 **Signal**: {action}
-📈 **Confidence**: {confidence:.1%}
-🕒 **Time**: {datetime.now().strftime('%H:%M:%S')}
+# Fetch = TODO símbolo que alguna estrategia pueda operar + los extras (benchmark,
+# calendario). Se computa DESPUÉS de STRATEGIES: una estrategia con universo propio
+# (p.ej. opex_drift → IVV/QQQ) quedaría sin barras si esto se derivara solo de
+# UNIVERSE — la misma clase de bug que dejó el alpha en null en junio 2026.
+FETCH_SYMBOLS = list(
+    dict.fromkeys(
+        list(UNIVERSE)
+        + [sym for cfg in STRATEGIES for sym in cfg.symbols]
+        + _EXTRA_SYMBOLS
+    )
+)
 
-💰 **Status**: Paper Trading Active
-🛡️ **Protection**: All systems operational
-            """
-            
-            logger.info("📱 Periodic update sent to Telegram")
-            
-        except Exception as e:
-            logger.error(f"Failed to send Telegram update: {e}")
-    
-    async def run_system(self):
-        """Run the complete trading system"""
-        try:
-            logger.info("🚀 Starting Enhanced Crypto Trading System...")
-            
-            # Initialize components
-            if not await self.initialize_components():
-                logger.error("❌ Failed to initialize components")
-                return False
-            
-            # Check historical data (optional, can run in background)
-            logger.info("📊 Setting up historical data...")
-            asyncio.create_task(self.check_historical_data())
-            
-            # Start Telegram bot
-            await self.start_telegram_bot()
-            
-            # Start trading bot
-            self.is_running = True
-            self.start_trading_bot()
-            
-            logger.info("🎉 Enhanced Trading System is now running!")
-            logger.info("📱 Check your Telegram for monitoring")
-            logger.info("🤖 Trading cycles every 60 seconds")
-            logger.info("🛡️ Paper trading mode - safe for testing")
-            
-            # Keep main thread alive
-            try:
-                while self.is_running:
-                    await asyncio.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("📡 Received shutdown signal")
-            
-            self.shutdown()
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ System run failed: {e}")
-            return False
-    
-    def shutdown(self):
-        """Shutdown the system gracefully"""
-        try:
-            logger.info("🛑 Shutting down trading system...")
-            
-            self.is_running = False
-            
-            # Stop trading bot
-            if self.trading_thread and self.trading_thread.is_alive():
-                logger.info("🤖 Stopping trading bot...")
-                self.trading_thread.join(timeout=10)
-            
-            # Stop Telegram bot
-            if self.telegram_thread and self.telegram_thread.is_alive():
-                logger.info("📱 Stopping Telegram bot...")
-                # Note: telegram_thread.join() might hang, so we'll just let it be daemon
-            
-            logger.info("✅ System shutdown completed")
-            
-        except Exception as e:
-            logger.error(f"Shutdown error: {e}")
 
-# =============================================================================
-# MAIN EXECUTION
-# =============================================================================
+def _is_first_trading_day_of_month(snapshot: Dict[str, pd.DataFrame]) -> bool:
+    """True when the latest bar is the first trading day of its month.
 
-async def main():
-    """Main function"""
-    print("🚀 Enhanced Crypto Trading System v6.0")
-    print("=" * 60)
-    print("🛡️ Safe Paper Trading Mode")
-    print("📱 Telegram Monitoring Active")
-    print("📊 Historical Data Integration")
-    print("🧠 Advanced Market Intelligence")
-    print("=" * 60)
-    
-    # Create and run system
-    system = TradingSystemManager()
-    
-    try:
-        await system.run_system()
-    except KeyboardInterrupt:
-        logger.info("📡 User interrupted, shutting down...")
-        system.shutdown()
-    except Exception as e:
-        logger.error(f"❌ System crashed: {e}")
-        system.shutdown()
-        sys.exit(1)
-
-def run_interactive_setup():
-    """Interactive setup for first-time users"""
-    print("🔧 First Time Setup")
-    print("=" * 30)
-    
-    # Check if Telegram is configured
-    import os
-    if not (os.getenv('TELEGRAM_BOT_TOKEN') and os.getenv('TELEGRAM_CHAT_ID')):
-        print("📱 Telegram not configured")
-        print("Run: python3 setup_telegram.py")
+    Uses the SPY calendar (falls back to any available symbol) so the monthly
+    momentum rebalance lands on a real session, not a weekend/holiday guess.
+    """
+    df = snapshot.get(REBALANCE_REFERENCE)
+    if df is None or len(df) == 0:
+        for candidate in snapshot.values():
+            if candidate is not None and len(candidate):
+                df = candidate
+                break
+    if df is None or len(df) == 0:
         return False
-    
-    # Check database
-    try:
-        from database_manager import get_database_manager
-        db = get_database_manager()
-        print("✅ Database connection OK")
-    except Exception as e:
-        print(f"❌ Database error: {e}")
-        return False
-    
-    print("✅ Setup verification completed")
-    return True
+    idx = df.index
+    last = idx[-1]
+    earlier_same_month = any(
+        d.year == last.year and d.month == last.month and d < last for d in idx
+    )
+    return not earlier_same_month
+
+
+def resolve_benchmark(
+    snapshot: Dict[str, pd.DataFrame],
+    inception: date = RACE_INCEPTION,
+) -> Tuple[Optional[dict], Optional[float]]:
+    """Compute the SPY buy&hold benchmark, loudly flagging the silent-null case.
+
+    The alpha column went dark for 10 days because ``compute_benchmark`` returned
+    None every run and nothing complained — every equity-curve snapshot quietly
+    carried ``alpha_pct: null``. If the benchmark can't be computed, alpha is null
+    for the whole window, so shout it into ``cron.log`` here instead of letting the
+    2-week checkpoint discover a useless curve. ``in_snapshot`` distinguishes the
+    "SPY never fetched" bug from the subtler "fetched but no usable bar at/after
+    inception" one.
+    """
+    benchmark = compute_benchmark(snapshot, BENCHMARK_SYMBOL, inception)
+    if benchmark is None:
+        logger.warning(
+            "benchmark %s could not be computed (in_snapshot=%s) -> alpha will be "
+            "null this run; check the SPY fetch/inception wiring",
+            BENCHMARK_SYMBOL, BENCHMARK_SYMBOL in snapshot,
+        )
+        return None, None
+    return benchmark, benchmark["return_pct"]
+
+
+def main() -> int:
+    load_dotenv()
+    base_url = os.getenv("ALPACA_BASE_URL", "")
+    if not base_url.startswith("https://paper-api.alpaca.markets"):
+        raise SystemExit(
+            "Refusing to run: ALPACA_BASE_URL is not a paper endpoint "
+            f"(got {base_url!r}). This bot only runs on paper."
+        )
+
+    logger.info("fetching bars for %d symbols (batch)...", len(FETCH_SYMBOLS))
+    snapshot = YFinanceBars().get_bars_batch(FETCH_SYMBOLS, LOOKBACK_BARS)
+    # The 13:00 CST cron runs mid-session, so yfinance's trailing bar is today's
+    # in-progress (partial) print. Trade and snapshot on settled closes only.
+    snapshot = drop_in_progress_bars(snapshot, date.today())
+    if not snapshot:
+        raise SystemExit("No bars returned for the universe; aborting (no trades).")
+    cached = CachedBars(snapshot)
+    is_rebalance = _is_first_trading_day_of_month(snapshot)
+    logger.info("universe bars: %d/%d usable; benchmark(%s)=%s; rebalance_day=%s",
+                len(snapshot), len(FETCH_SYMBOLS), BENCHMARK_SYMBOL,
+                BENCHMARK_SYMBOL in snapshot, is_rebalance)
+
+    initial_states = load_ledgers(STATE_PATH)
+    executor = Executor()
+    orch = Orchestrator(STRATEGIES, cached, LiveExecutorAdapter(executor),
+                        risk_config=HORSE_RISK_CONFIG, initial_states=initial_states)
+    orch.run_cycle(is_rebalance_day=is_rebalance)
+    # NOTE: executor.check_time_exits() is intentionally NOT called here in v1.
+    # Time-exit reconciliation requires per-strategy ledger lookup to know which
+    # strategy's shares are being closed (same CORE invariant as SELL). This is a
+    # follow-up item; close_position() has the same whole-position bug as the old sell.
+
+    portfolios = [orch.portfolio(s.strategy) for s in STRATEGIES]
+    save_ledgers(portfolios, STATE_PATH)
+    logger.info("ledger state saved to %s", STATE_PATH)
+
+    marks = {sym: float(df["close"].iloc[-1]) for sym, df in snapshot.items() if len(df)}
+    # No silent cost-basis fallback: VirtualPortfolio.to_portfolio_state marks a
+    # held name with no fresh price at its entry cost (avg_entry), which fabricates
+    # that position's value — equity then looks calmer than reality on exactly the
+    # days data is flaky, with zero trace. Coverage is ~full today (503-504/504),
+    # but shout the day it isn't so a tainted equity/return is never silent.
+    held_unmarked = sorted(
+        {sym for vp in portfolios for sym in vp.to_dict()["lots"] if sym not in marks}
+    )
+    if held_unmarked:
+        logger.warning(
+            "%d HELD symbols missing a fresh mark -> valued at entry cost (equity "
+            "understated/tainted this run): %s",
+            len(held_unmarked), ", ".join(held_unmarked),
+        )
+    benchmark, benchmark_pct = resolve_benchmark(snapshot)
+    rows = build_report(portfolios, marks=marks, benchmark_pct=benchmark_pct)
+    print(format_table(rows, benchmark=benchmark))
+
+    # Persist a daily equity/alpha snapshot per horse so the 2-week checkpoint
+    # can read an equity *curve* (drawdown, alpha stability), not just the last
+    # cut. Stamp it with the latest bar's date (matches the benchmark window and
+    # stays idempotent if the cron re-fires the same session).
+    snapshot_day = max(
+        (df.index[-1].date() for df in snapshot.values() if len(df)),
+        default=date.today(),
+    )
+    append_snapshot(rows, benchmark_pct, snapshot_day, EQUITY_CURVE_PATH)
+    logger.info("equity snapshot appended for %s to %s", snapshot_day, EQUITY_CURVE_PATH)
+
+    # Risk side of the ledger: a horse can lead on return while riding a brutal
+    # drawdown. Read the curve we just extended and print max-drawdown / vol so
+    # the 2-week checkpoint reads risk-adjusted, not raw, return.
+    risk = compute_risk_metrics(load_snapshots(EQUITY_CURVE_PATH))
+    print(format_risk_table(risk))
+    return 0
+
 
 if __name__ == "__main__":
-    import sys
-    
-    if "--setup" in sys.argv:
-        if run_interactive_setup():
-            print("🚀 Ready to run: python3 run_trading_system.py")
-        else:
-            print("❌ Setup incomplete")
-    else:
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            print("\n📡 Shutdown completed")
-        except Exception as e:
-            print(f"\n❌ System error: {e}")
-            sys.exit(1)
+    raise SystemExit(main())

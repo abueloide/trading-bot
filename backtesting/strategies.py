@@ -51,6 +51,20 @@ def bollinger(series: pd.Series, period: int = 20, std: float = 2.0):
     return mid + std * sd, mid, mid - std * sd
 
 
+def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Average True Range — volatility in price units."""
+    prev_close = df["close"].shift(1)
+    true_range = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - prev_close).abs(),
+            (df["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return true_range.rolling(period, min_periods=1).mean()
+
+
 # ------------------------------------------------------------ helper builders
 
 def _empty_signals(df: pd.DataFrame) -> pd.DataFrame:
@@ -88,12 +102,12 @@ def strategy_rsi_mr_vix(
     uptrend = sym_short > sym_long
 
     if vix_rank_series is not None:
-        vix_ok = vix_rank_series.reindex(df.index).fillna(method="ffill") < vix_threshold
+        vix_ok = vix_rank_series.reindex(df.index).ffill() < vix_threshold
     else:
         vix_ok = pd.Series(True, index=df.index)
 
     if spy_close is not None and len(spy_close) >= sma_long:
-        spy_aligned = spy_close.reindex(df.index).fillna(method="ffill")
+        spy_aligned = spy_close.reindex(df.index).ffill()
         spy_ma = sma(spy_aligned, sma_long)
         spy_ok = spy_aligned > spy_ma
     else:
@@ -109,28 +123,35 @@ def strategy_confirmed_mr(
     spy_close: Optional[pd.Series] = None,
     rsi_buy: int = 15,
     rsi_sell: int = 65,
+    sma_short: int = 50,
     sma_long: int = 200,
 ) -> pd.DataFrame:
     """Strategy B — Confirmed Mean Reversion.
 
-    Entry: RSI(2) < 15 AND close > open (bullish reversal) AND SPY > 200d MA.
+    Entry: RSI(2) < 15 AND close > open (bullish reversal) AND SPY > 200d MA
+           AND symbol's 50d MA > 200d MA (per-name uptrend filter).
     Exit: RSI(2) > 65 (engine enforces 7-day time exit).
+
+    The per-name uptrend filter (the same one rsi_mr already had) is what stops
+    this horse catching falling knives — the 06-25 audit traced its −9% bleed to
+    buying oversold names that kept trending down with no trend gate.
     """
     sig = _empty_signals(df)
-    if df.empty or len(df) < 30:
+    if df.empty or len(df) < sma_long:
         return sig
 
     r = rsi(df["close"], period=2)
     bullish_candle = df["close"] > df["open"]
+    uptrend = sma(df["close"], sma_short) > sma(df["close"], sma_long)
 
     if spy_close is not None and len(spy_close) >= sma_long:
-        spy_aligned = spy_close.reindex(df.index).fillna(method="ffill")
+        spy_aligned = spy_close.reindex(df.index).ffill()
         spy_ma = sma(spy_aligned, sma_long)
         spy_ok = spy_aligned > spy_ma
     else:
         spy_ok = pd.Series(True, index=df.index)
 
-    sig["entry"] = (r < rsi_buy) & bullish_candle & spy_ok
+    sig["entry"] = (r < rsi_buy) & bullish_candle & uptrend & spy_ok
     sig["exit"] = r > rsi_sell
     return sig
 
@@ -158,6 +179,101 @@ def strategy_momentum_rotation(
     sig["momentum_score"] = momentum_score
     sig["entry"] = momentum_score > 0
     sig["exit"] = momentum_score < 0
+    return sig
+
+
+def strategy_donchian_breakout(
+    df: pd.DataFrame, entry_lookback: int = 20, exit_lookback: int = 10,
+) -> pd.DataFrame:
+    """Strategy D — Donchian channel breakout (trend following).
+
+    Entry: close breaks ABOVE the highest high of the prior ``entry_lookback``
+           bars (a 20-day high breakout).
+    Exit:  close breaks BELOW the lowest low of the prior ``exit_lookback`` bars
+           (a 10-day low). No time stop — the channel itself carries the trend.
+
+    Genuinely distinct from the other horses: momentum buys what already ran for
+    6 months, mean-reversion buys what fell, this buys the instant price makes a
+    new local high and rides until it makes a new local low. Channels use the
+    PRIOR window (``.shift(1)``) so the break is measured against bars before
+    today, never against today's own high/low.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < entry_lookback + 1:
+        return sig
+    upper = df["high"].rolling(entry_lookback).max().shift(1)
+    lower = df["low"].rolling(exit_lookback).min().shift(1)
+    sig["entry"] = df["close"] > upper
+    sig["exit"] = df["close"] < lower
+    return sig
+
+
+def strategy_trend_pullback(
+    df: pd.DataFrame, fast: int = 20, slow: int = 50,
+) -> pd.DataFrame:
+    """Strategy E — buy resolved pullbacks inside an intermediate uptrend.
+
+    Thesis: the two dead mean-reversion horses (rsi_mr, confirmed_mr) *fought*
+    the trend — they bought extreme oversold (RSI2<10/15) with no requirement
+    that the pullback had turned back up, so they caught falling knives. This
+    buys *with* the trend instead: only when the intermediate trend is up
+    (SMA20 > SMA50) AND price has just reclaimed the fast line from below (a
+    shallow dip that resolved upward), then rides until the trend itself breaks
+    (close < SMA50). No extreme-oversold trigger, no counter-trend bet.
+
+    Regime it expects to work in: intermediate/persistent UPTRENDS (the exact
+    walk-forward OOS regime here, ~2024). It should sit out sustained
+    downtrends because the SMA20>SMA50 gate is false there. Short lookbacks
+    (20/50) so the signal is valid inside a 6-month OOS window — unlike a 200d
+    regime line, which never accumulates enough bars per walk-forward window.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < slow + 1:
+        return sig
+    fast_ma = sma(df["close"], fast)
+    slow_ma = sma(df["close"], slow)
+    uptrend = fast_ma > slow_ma
+    reclaim = (df["close"] > fast_ma) & (df["close"].shift(1) <= fast_ma.shift(1))
+    sig["entry"] = reclaim & uptrend
+    sig["exit"] = df["close"] < slow_ma
+    return sig
+
+
+def strategy_pullback_ride(
+    df: pd.DataFrame, fast: int = 20, slow: int = 50, trail_lookback: int = 10,
+) -> pd.DataFrame:
+    """Strategy F — buy the contained dip, ride with a trailing-low stop.
+
+    Thesis: trend_pullback (Field 02, idea 1) died for two named reasons in its
+    postmortem: it entered *late* (bought only after price reclaimed SMA20, i.e.
+    after the bounce already happened) and exited *early* (bailed on every touch
+    of SMA50, cutting winners). Donchian tests the opposite entry (buy new highs,
+    ride to an N-day low) and also had no edge. The untested cell is: buy the dip
+    *itself* — while price is still under the fast line but held above the slow
+    line inside an uptrend (weakness within strength, earlier than a reclaim) —
+    and ride with a trailing-low stop instead of a fixed SMA50 exit, so winners
+    run until a real trend break rather than every shallow pullback.
+
+    Entry: SMA20 > SMA50 (uptrend) AND close <= SMA20 (in the dip, not extended)
+           AND close > SMA50 (dip is contained above the slow line, not a knife).
+    Exit:  close < lowest low of the prior ``trail_lookback`` bars (trend break),
+           not the first SMA50 kiss.
+
+    Regime it expects to work in: persistent uptrends that pull back shallowly to
+    the fast MA. It sits out downtrends (SMA20>SMA50 false) and hard selloffs
+    (close>SMA50 false). Short lookbacks (20/50/10) so every gate is valid inside
+    the ~6-month walk-forward OOS window.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < slow + 1:
+        return sig
+    fast_ma = sma(df["close"], fast)
+    slow_ma = sma(df["close"], slow)
+    uptrend = fast_ma > slow_ma
+    in_dip = (df["close"] <= fast_ma) & (df["close"] > slow_ma)
+    trail_stop = df["low"].rolling(trail_lookback).min().shift(1)
+    sig["entry"] = uptrend & in_dip
+    sig["exit"] = df["close"] < trail_stop
     return sig
 
 
@@ -190,9 +306,162 @@ def strategy_bollinger_breakout(
     return sig
 
 
+def strategy_bollinger_reversion(
+    df: pd.DataFrame, period: int = 20, std: float = 2.0,
+) -> pd.DataFrame:
+    """Strategy G — short-horizon mean-reversion for the choppy regime.
+
+    Thesis (H4): every trend/momentum/breakout horse died in 2022-26 because the
+    tape was range-bound/whipsaw — there was no persistent direction to ride
+    (trend_pullback, pullback_ride, donchian, momentum, crypto momentum,
+    commodities trend: all FAIL gate). The mirror image of *why they died* is
+    edge for mean-reversion: in a choppy tape, stretched short-term moves snap
+    back to the mean. The two prior MR horses (rsi_mr, confirmed_mr) never got
+    to test this cell — both gate on a 200-day SMA regime line that never
+    accumulates enough bars inside a 6-month walk-forward OOS window, so they
+    effectively sit in cash there. This uses ONLY short lookbacks (20-bar band),
+    no 200d filter, so every gate is valid inside the OOS window.
+
+    Entry: close was BELOW the lower band on the prior bar and closes back
+           ABOVE it today — a stretched-down move that has begun to snap back
+           (reclaim, not a falling knife: we wait for the turn, not the extreme).
+    Exit:  close >= the middle band (SMA20) — reversion to the mean complete.
+           Time-stopped by the engine (max_hold_days) if the snap-back stalls.
+
+    Distinct from bollinger_breakout, which buys UPPER-band breaks and rides up;
+    this buys LOWER-band reclaims and sells into the mean. Opposite sign, same
+    bands.
+
+    Regime it expects to work in: range-bound / mean-reverting markets (the exact
+    2022-26 OOS regime that broke every directional horse). It should bleed in a
+    strong one-way trend, where "oversold" keeps getting more oversold — but the
+    walk-forward gate is precisely the test of whether that regime dominates.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < period + 1:
+        return sig
+    _upper, mid, lower = bollinger(df["close"], period, std)
+    reclaim = (df["close"].shift(1) < lower.shift(1)) & (df["close"] >= lower)
+    sig["entry"] = reclaim
+    sig["exit"] = df["close"] >= mid
+    return sig
+
+
+def strategy_donchian_atr_ride(
+    df: pd.DataFrame,
+    entry_lookback: int = 20,
+    exit_lookback: int = 10,
+    atr_period: int = 14,
+    atr_mult: float = 1.5,
+) -> pd.DataFrame:
+    """Strategy H — 20-day-high breakout with a volatility-buffered exit.
+
+    Thesis: donchian_breakout (H2) died from whipsaw — its 10-day-low exit was
+    too tight, so every shallow pullback stopped it out before the trend
+    resumed. The entry (buy a new local high) is not what killed it: H4's
+    postmortem established the 2022-26 large-cap tape was a *strong bull*, so
+    new-high breakouts do catch real trends. The untested fix is the exit: widen
+    it by an ATR buffer so it adapts to each name's volatility. The stop only
+    triggers on a break that clears the recent low by 1.5×ATR — noise inside the
+    trend is held, a genuine trend break still exits. Same entry as donchian,
+    strictly looser (later) exit.
+
+    Entry: close breaks ABOVE the prior ``entry_lookback``-bar high.
+    Exit:  close < (prior ``exit_lookback``-bar low − ``atr_mult`` × ATR), using
+           the PRIOR bar's ATR/low so the stop is known before today's bar.
+
+    Regime it expects to work in: persistent large-cap UPTRENDS that pull back
+    shallowly (the exact BALANCED-universe OOS regime, ~2024-26). It should bleed
+    in a choppy/range-bound tape where breakouts fail repeatedly — but a wider
+    stop means fewer, larger whipsaws there, not more. Short lookbacks (20/10/14)
+    so every gate is valid inside the ~6-month walk-forward OOS window.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < entry_lookback + 1:
+        return sig
+    upper = df["high"].rolling(entry_lookback).max().shift(1)
+    lower = df["low"].rolling(exit_lookback).min().shift(1)
+    buffer = atr_mult * atr(df, atr_period).shift(1)
+    sig["entry"] = df["close"] > upper
+    sig["exit"] = df["close"] < (lower - buffer)
+    return sig
+
+
+def strategy_regime_trend_hold(
+    df: pd.DataFrame,
+    trend_period: int = 50,
+    slope_lookback: int = 10,
+    exit_buffer: float = 0.03,
+) -> pd.DataFrame:
+    """Strategy H6 — always-in trend hold, buffered exit (no breakout timing).
+
+    Thesis: every prior long-only strategy (H1-H5 + legacy) died the same way —
+    it sat in CASH too much and lost to a strong-bull buy-and-hold (breadth 0.0
+    across the board). Breakout (H5) got the best failed Sharpe (0.54) but still
+    bled because it only enters on a *new high* and idles between ruptures. The
+    untested structural fix, named in H5's postmortem: stop timing ruptures and
+    instead STAY INVESTED for the whole uptrend, cutting only sustained
+    downtrends. That raises invested-time (fixes breadth) and, by dodging the
+    deep down-legs, should lift risk-adjusted return (the one clean gate axis,
+    since excess/breadth are contaminated by the benchmark-window defect).
+
+    To avoid the whipsaw that killed the breakout family, entry is gated twice:
+    price above the trend SMA AND the SMA itself *rising* (refuses to buy into a
+    flat, chopping MA). Exit only on a DECISIVE break — close below the SMA by
+    ``exit_buffer`` — so shallow pullbacks are held, not sold into.
+
+    Entry: close > SMA(trend_period) AND SMA rising over ``slope_lookback`` bars.
+    Exit:  close < SMA(trend_period) × (1 − ``exit_buffer``).
+    Both use the PRIOR bar's SMA (shifted) so no lookahead.
+
+    Regime it expects to work in: persistent uptrends with shallow pullbacks
+    (the BALANCED OOS tape, ~2024-26). It should bleed in sharp V-bottoms (exits
+    on the buffer break, re-enters higher) and in prolonged flat chop — but the
+    slope filter refuses entry there, capping the damage. Short lookback (50/10)
+    stays valid inside the ~6-month walk-forward OOS window.
+    """
+    sig = _empty_signals(df)
+    if df.empty or len(df) < trend_period + slope_lookback + 1:
+        return sig
+    trend = sma(df["close"], trend_period).shift(1)
+    rising = trend > trend.shift(slope_lookback)
+    sig["entry"] = (df["close"] > trend) & rising
+    sig["exit"] = df["close"] < trend * (1.0 - exit_buffer)
+    return sig
+
+
 # ---------------------------------------------------------- registry
 
+def strategy_opex_drift(df: pd.DataFrame) -> pd.DataFrame:
+    """C2 — OpEx 1-day drift, long-only leg (see docs/CANDIDATES.md).
+
+    Entra al cierre del 3er viernes del mes (vencimiento mensual de opciones)
+    SOLO si ese día cerró en verde; sale a la siguiente sesión. Tesis: el flujo
+    residual de cobertura de dealers continúa ~1 sesión antes de disiparse.
+
+    Por qué solo-largo: el ledger virtual no soporta cortos, y medido (2026-07-26)
+    la pata larga es la BUENA — hit 64-73% neto vs ~50% de la versión con cortos;
+    la pata corta arrastraba (QQQ 2022-24: −0.105%/evento).
+    """
+    sig = _empty_signals(df)
+    if len(df) < 2:
+        return sig
+    idx = pd.DatetimeIndex(df.index)
+    # 3er viernes = viernes (weekday 4) cuyo día del mes cae en 15..21
+    is_opex = (idx.weekday == 4) & (idx.day >= 15) & (idx.day <= 21)
+    up_day = df["close"] > df["close"].shift(1)
+    sig["entry"] = is_opex & up_day.to_numpy()
+    sig["exit"] = ~sig["entry"]  # hold exactamente una sesión
+    return sig
+
+
 STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
+    "opex_drift": {
+        "fn": strategy_opex_drift,
+        "type": "opex",
+        "max_hold_days": 1,
+        "description": "C2 — OpEx (3er viernes) 1-day drift, long-only",
+    },
     "rsi_mr": {
         "fn": strategy_rsi_mr_vix,
         "type": "mean_reversion",
@@ -211,6 +480,33 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "max_hold_days": None,  # rebalanced monthly
         "description": "6-month momentum, skip last month, monthly rebalance",
     },
+    "momentum_news": {
+        # Same momentum engine; the news-sentiment veto is applied as a
+        # portfolio overlay in the orchestrator (StrategyConfig.news_overlay),
+        # not in the per-bar signal, so the registry fn stays identical.
+        "fn": strategy_momentum_rotation,
+        "type": "momentum",
+        "max_hold_days": None,
+        "description": "Momentum rotation + AlphaVantage news-sentiment veto",
+    },
+    "trend_pullback": {
+        "fn": strategy_trend_pullback,
+        "type": "breakout",  # signal exit (close < SMA50), no time stop
+        "max_hold_days": None,
+        "description": "Buy resolved pullbacks in an SMA20>SMA50 uptrend",
+    },
+    "pullback_ride": {
+        "fn": strategy_pullback_ride,
+        "type": "breakout",  # signal exit (trailing-low break), no time stop
+        "max_hold_days": None,
+        "description": "Buy contained dip in SMA20>SMA50 uptrend, ride 10-day trailing-low stop",
+    },
+    "donchian_breakout": {
+        "fn": strategy_donchian_breakout,
+        "type": "breakout",
+        "max_hold_days": None,  # exits on a 10-day-low break, not on time
+        "description": "Donchian 20/10 channel breakout (trend following)",
+    },
     "ema_crossover": {
         "fn": strategy_ema_crossover,
         "type": "breakout",
@@ -223,6 +519,24 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, object]] = {
         "max_hold_days": None,
         "description": "Legacy Bollinger band breakout",
     },
+    "bollinger_reversion": {
+        "fn": strategy_bollinger_reversion,
+        "type": "mean_reversion",
+        "max_hold_days": 10,
+        "description": "Lower-band reclaim mean-reversion, short lookbacks only (H4)",
+    },
+    "donchian_atr_ride": {
+        "fn": strategy_donchian_atr_ride,
+        "type": "breakout",  # signal exit (ATR-buffered channel break), no time stop
+        "max_hold_days": None,
+        "description": "20-day-high breakout, exit on 10-day-low − 1.5×ATR (H5)",
+    },
+    "regime_trend_hold": {
+        "fn": strategy_regime_trend_hold,
+        "type": "trend",  # always-in while trend up, buffered SMA-break exit, no time stop
+        "max_hold_days": None,
+        "description": "Always-in above rising SMA50, exit on decisive 3% break below (H6)",
+    },
 }
 
 
@@ -230,3 +544,4 @@ def get_strategy(name: str) -> Dict[str, object]:
     if name not in STRATEGY_REGISTRY:
         raise KeyError(f"Unknown strategy: {name}. Available: {list(STRATEGY_REGISTRY)}")
     return STRATEGY_REGISTRY[name]
+

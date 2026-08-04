@@ -125,6 +125,48 @@ SP500_SEED: List[Dict[str, str]] = [
 ]
 
 
+# Symbols in the static S&P 500 snapshot that Alpaca will NOT trade. When a horse
+# selects one of these, the BUY fails graceful ("asset not found", exit 0) and the
+# horse leaks that slot to cash, biasing its return vs the others. Dropping them at
+# universe-build time means each strategy picks its next-best TRADEABLE name instead.
+# ponytail: pinned exclusion set, not a live Alpaca asset query. Observed offender
+# is SATS (EchoStar) — yfinance prices it, Alpaca rejects it. If this set grows past
+# a handful, swap to a startup Alpaca get_all_assets() intersection.
+UNTRADEABLE_AT_BROKER = frozenset({"SATS"})
+
+
+def sp500_constituents() -> List[Dict[str, str]]:
+    """Full static S&P 500 constituent list (symbol+sector), committed in-source.
+
+    Reads the build-time snapshot in ``sp500_constituents.py``. Falls back to the
+    smaller ``SP500_SEED`` if that module is missing, so the bot still runs with a
+    valid (if narrower) universe. NEVER hits the network at runtime — refreshing
+    the snapshot is a deliberate manual rebuild. Symbols in
+    ``UNTRADEABLE_AT_BROKER`` are dropped so no strategy wastes a slot on a name
+    Alpaca rejects.
+    """
+    try:
+        from sp500_constituents import SP500_CONSTITUENTS  # type: ignore
+        if SP500_CONSTITUENTS:
+            rows = list(SP500_CONSTITUENTS)
+        else:
+            rows = list(SP500_SEED)
+    except Exception as e:  # pragma: no cover - defensive import guard
+        logger.warning("sp500_constituents snapshot unavailable, using seed: %s", e)
+        rows = list(SP500_SEED)
+    return [row for row in rows if row["symbol"] not in UNTRADEABLE_AT_BROKER]
+
+
+def sp500_symbols() -> List[str]:
+    """yfinance-ready symbol list for the full static S&P 500 universe."""
+    return [row["symbol"] for row in sp500_constituents()]
+
+
+def sp500_sector_map() -> Dict[str, str]:
+    """symbol -> GICS sector for the full static universe."""
+    return {row["symbol"]: row["sector"] for row in sp500_constituents()}
+
+
 # Backwards-compatible presets (replaces crypto_universe.TRADING_PRESETS).
 TRADING_PRESETS: Dict[str, Dict[str, Any]] = {
     "CONSERVATIVE": {

@@ -8,6 +8,9 @@ logs/
 *.backup
 *_corrupted*
 
+# local CLI artifacts (OpenClaw image scratch dir)
+.openclaw-cli-images/
+
 # v2 — local data, backtests, caches
 data/
 backtesting/results/
@@ -15,3 +18,7 @@ backtesting/results/
 *.sqlite
 *.sqlite3
 *.csv.bak
+graphify-out/
+
+# Reactor de noticias: ledger y journal son estado vivo, no código
+data/news_reactor/
