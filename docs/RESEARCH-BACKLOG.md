@@ -112,12 +112,48 @@ tests). Postmortem: `docs/postmortems/2026-08-04-news-catalyst-reactor-r2.md`.
 > percentil **<50** no es solo "no pasó" — es que la condición de entrada es
 > activamente peor que su ausencia; un placebo random es ciego a eso.
 
+### R3 — Auditoría del field MR en vivo (`confirmed_mr`, `rsi_mr`) · HECHO · MIXTO ⚠️ (2026-08-04)
+Tercera aplicación del patrón: los dos caballos de mean-reversion llevan en paper
+desde el arranque, nunca enfrentaron el método actual, y arrastraban el defecto HIGH
+#3 de la auditoría 07-02 (GATED): **`live/portfolio_targets.py` llama `fn(df)` pelón
+y el engine inyecta `spy_close`** ⇒ el caballo que corre NO lleva el filtro
+SPY>200dMA con el que se validó. Medido: **el filtro vale +0.10 a +0.21pp por trade**
+en 3 de 4 celdas, y en OOS es todo — `rsi_mr` sin filtro cae a percentil **71.5**
+contra su control condicionado+duration-matched (exp +0.312% vs control +0.267%:
+indistinguible de comprar cualquier día del mismo nombre en tendencia); **con**
+filtro, percentil 100. Segundo hallazgo de plomería: el **filtro VIX de `rsi_mr` está
+muerto en AMBOS caminos** — `extra_data["vix_rank"]` no lo llena nadie en el repo; el
+caballo nunca tuvo el filtro que lleva en el nombre.
+**La señal no está muerta** (expectativa positiva neta en las 4 celdas, placebo ≥91
+en 3 de 4) **pero no es candidata**: el control **sin sesgo de supervivencia** (ETFs
+de índice) deja a `rsi_mr`-OOS en **pct 52.5**, el jackknife k=3 sobre 58 símbolos no
+prueba nada (solo 38-45/58 símbolos positivos), y **el tranche que el vivo realmente
+opera** (ordena por RSI2 asc. para llenar 10 slots) rinde MENOS que el menos
+sobrevendido en 5 de 8 celdas. Sin constituyentes históricos con delistados el número
+no se puede limpiar → BLOCKED-DATA, no pendiente.
+**Despliegue NO tocado.** Recomendación: pasar `spy_close` en el vivo (plomería, no
+cambio de tesis) y renombrar/borrar el "VIX filter" inexistente.
+Harness: `events/field_audit.py` (+ `tests/test_field_audit.py`).
+Postmortem: `docs/postmortems/2026-08-04-field-mr-live-audit-r3.md`.
+
+> **Reglas de método nuevas:** (1) **el jackknife escala con el número de grupos** —
+> k=3 sobre 23 mata edges, sobre 58 no prueba nada; con pools grandes informa la
+> *fracción* de grupos positivos. (2) **Universo estático ⇒ celda de control sin
+> supervivencia obligatoria**: un backtest sobre los constituyentes de HOY mide qué
+> le funcionó a los que sobrevivieron, y comprar caídas es el trade que ese sesgo más
+> adorna. (3) **El placebo iguala la DURACIÓN, no solo el condicionamiento** (si la
+> salida es por señal, el control sale casi de inmediato y el percentil mide tiempo
+> en el mercado). (4) **Medir la regla que corre incluye medir a QUIÉN elige**: con
+> más señales que slots, lo desplegado es señal + ranking + capacidad.
+
 > **Estado del loop:** sin carril PENDIENTE que drenar. COLA GORDA agotado (F1-F4),
 > E2/E3 BLOCKED-DATA, FOMC y daily-bar son pozos secos declarados. **Lo que el loop
 > puede hacer sin decisión de Luis es auditar lo desplegado contra la barra vigente**
-> (esto fue R1 y R2 — y R2 dejó el patrón claro: **lo desplegado sin backtest es la
-> primera cola a drenar**). Lo que necesita decisión: matar el reactor (R2), abrir
-> carril opciones, o desbloquear E2/E3 con datos.
+> (esto fue R1, R2 y R3 — patrón: **lo desplegado sin backtest vigente es la primera
+> cola a drenar**). Queda sin auditar el par de caballos no-MR (`momentum_rotation`,
+> `donchian_breakout`), que no tienen divergencia live↔backtest pero tampoco han
+> pasado la barra actual. Lo que necesita decisión: matar el reactor (R2), pasar
+> `spy_close` al vivo (R3), abrir carril opciones, o desbloquear E2/E3 con datos.
 
 ## Prioridad (histórico)
 
