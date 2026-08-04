@@ -84,11 +84,40 @@ Harness: `events/opex_audit.py`; `jackknife_by_event` + `leave_one_year_out` en
 > (día verde, stop, umbral de gap), **el placebo condiciona igual**. Un control sin
 > condicionar mide el condicionamiento, no el evento — e infla el percentil.
 
+### R2 — Auditoría del news reactor (el backtest que "no existía") · HECHO · FAIL ❌ (2026-08-04)
+Segunda aplicación del patrón R1: auditar lo DESPLEGADO contra la barra vigente. El
+reactor corre en paper desde 07-30 con la justificación de que **no se podía
+backtestear** ("el histórico topa en 1 página"). **Era un bug de paginación nuestro:**
+con filtro por símbolo el histórico llega a 2016 → **214,162 titulares, 31 símbolos,
+1,112 días-evento**. Se midió la regla que CORRE (importando `classify`/`pick_symbol`
+del módulo vivo), no una reimplementación.
+**FAIL en las 6 celdas** (2 regímenes × w=1/3/5d), `tail_ratio` 0.82–1.13 contra piso
+3.0. Y dos killers independientes sobre el holding desplegado (w=1d): **percentil
+40.8 en OOS contra placebo condicionado** — el catalizador rinde MENOS que un día en
+que el símbolo salió en noticias sin catalizador, o sea el filtro resta valor — y el
+**jackknife voltea el signo** (−0.109% OOS, −0.091% IS al quitar 3 nombres). Por tipo,
+`earnings_beat` es el peor de los cinco (**−0.968%**, hit 40%): cuando sale el titular
+el movimiento ya ocurrió. Sesgo de supervivencia (31 líquidos vs cualquier ticker de
+Benzinga) **infla** el resultado → el FAIL es más fuerte que el número.
+**Despliegue NO tocado** (cambio en vivo = decisión de Luis). **Recomendación: matar el
+reactor** — no es afinable, un percentil <50 dice que el filtro resta, no que esté mal
+calibrado; mover `HOLD_DAYS` a 5d sería girar la perilla contra el mismo dato que la
+eligió (F4). Harness: `events/news_catalyst_study.py` + `events/news_backfill.py` (con
+tests). Postmortem: `docs/postmortems/2026-08-04-news-catalyst-reactor-r2.md`.
+
+> **Regla de método nueva:** **"no se puede backtestear" es un bug abierto, no una
+> propiedad del mundo** — y nunca una licencia para saltarse el gate. Si esa frase es
+> lo que justifica desplegar sin validar, atacar la frase es la primera tarea. Aquí
+> costó 5 días de una estrategia viva sin edge. Corolario: un placebo condicionado con
+> percentil **<50** no es solo "no pasó" — es que la condición de entrada es
+> activamente peor que su ausencia; un placebo random es ciego a eso.
+
 > **Estado del loop:** sin carril PENDIENTE que drenar. COLA GORDA agotado (F1-F4),
 > E2/E3 BLOCKED-DATA, FOMC y daily-bar son pozos secos declarados. **Lo que el loop
 > puede hacer sin decisión de Luis es auditar lo desplegado contra la barra vigente**
-> (esto fue R1). Lo que necesita decisión: abrir carril opciones, o desbloquear
-> E2/E3 con datos.
+> (esto fue R1 y R2 — y R2 dejó el patrón claro: **lo desplegado sin backtest es la
+> primera cola a drenar**). Lo que necesita decisión: matar el reactor (R2), abrir
+> carril opciones, o desbloquear E2/E3 con datos.
 
 ## Prioridad (histórico)
 
