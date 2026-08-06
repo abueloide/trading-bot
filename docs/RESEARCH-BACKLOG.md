@@ -112,12 +112,96 @@ tests). Postmortem: `docs/postmortems/2026-08-04-news-catalyst-reactor-r2.md`.
 > percentil **<50** no es solo "no pasó" — es que la condición de entrada es
 > activamente peor que su ausencia; un placebo random es ciego a eso.
 
+### R3 — Auditoría del field MR en vivo (`confirmed_mr`, `rsi_mr`) · HECHO · MIXTO ⚠️ (2026-08-04)
+Tercera aplicación del patrón: los dos caballos de mean-reversion llevan en paper
+desde el arranque, nunca enfrentaron el método actual, y arrastraban el defecto HIGH
+#3 de la auditoría 07-02 (GATED): **`live/portfolio_targets.py` llama `fn(df)` pelón
+y el engine inyecta `spy_close`** ⇒ el caballo que corre NO lleva el filtro
+SPY>200dMA con el que se validó. Medido: **el filtro vale +0.10 a +0.21pp por trade**
+en 3 de 4 celdas, y en OOS es todo — `rsi_mr` sin filtro cae a percentil **71.5**
+contra su control condicionado+duration-matched (exp +0.312% vs control +0.267%:
+indistinguible de comprar cualquier día del mismo nombre en tendencia); **con**
+filtro, percentil 100. Segundo hallazgo de plomería: el **filtro VIX de `rsi_mr` está
+muerto en AMBOS caminos** — `extra_data["vix_rank"]` no lo llena nadie en el repo; el
+caballo nunca tuvo el filtro que lleva en el nombre.
+**La señal no está muerta** (expectativa positiva neta en las 4 celdas, placebo ≥91
+en 3 de 4) **pero no es candidata**: el control **sin sesgo de supervivencia** (ETFs
+de índice) deja a `rsi_mr`-OOS en **pct 52.5**, el jackknife k=3 sobre 58 símbolos no
+prueba nada (solo 38-45/58 símbolos positivos), y **el tranche que el vivo realmente
+opera** (ordena por RSI2 asc. para llenar 10 slots) rinde MENOS que el menos
+sobrevendido en 5 de 8 celdas. Sin constituyentes históricos con delistados el número
+no se puede limpiar → BLOCKED-DATA, no pendiente.
+**Despliegue NO tocado.** Recomendación: pasar `spy_close` en el vivo (plomería, no
+cambio de tesis) y renombrar/borrar el "VIX filter" inexistente.
+Harness: `events/field_audit.py` (+ `tests/test_field_audit.py`).
+Postmortem: `docs/postmortems/2026-08-04-field-mr-live-audit-r3.md`.
+
+> **Reglas de método nuevas:** (1) **el jackknife escala con el número de grupos** —
+> k=3 sobre 23 mata edges, sobre 58 no prueba nada; con pools grandes informa la
+> *fracción* de grupos positivos. (2) **Universo estático ⇒ celda de control sin
+> supervivencia obligatoria**: un backtest sobre los constituyentes de HOY mide qué
+> le funcionó a los que sobrevivieron, y comprar caídas es el trade que ese sesgo más
+> adorna. (3) **El placebo iguala la DURACIÓN, no solo el condicionamiento** (si la
+> salida es por señal, el control sale casi de inmediato y el percentil mide tiempo
+> en el mercado). (4) **Medir la regla que corre incluye medir a QUIÉN elige**: con
+> más señales que slots, lo desplegado es señal + ranking + capacidad.
+
+### R4 — Auditoría de los caballos no-MR en vivo (`momentum_rotation`, `donchian_breakout`) · HECHO · momentum FAIL ❌ / donchian MIXTO ⚠️ (2026-08-05)
+Cuarta aplicación del patrón. La divergencia live↔backtest resultó **mayor que la de
+R3**: no es un parámetro que se pierde, es **otra regla**. Lo registrado y gateable de
+momentum es una señal POR SÍMBOLO (`entry = momentum_score > 0`, que en un bull no
+selecciona nada); lo desplegado es **cross-sectional** (`momentum_top(bars, 15,
+sector_of, max_per_sector=3)`, rebalanceo mensual). El **ranking nunca pasó por un
+gate** y el **cap sectorial existe SÓLO en el vivo** (no hay backtest de él en el repo).
+Donchian sí llama `fn(df)` idéntico, pero raciona 10 slots por fuerza de ruptura.
+**`momentum_rotation` MUERE con tres killers independientes.** Contra el control
+honesto para un long-only —**15 nombres al azar del mismo universo, mismos periodos**—
+da percentil **49.0** en OOS (+1.540% vs +1.549%: moneda al aire) y **16.0** en IS
+(+0.740% vs +1.067%: por la regla de R2, la condición de entrada **resta**). Y el
+**tranche opuesto gana en ambos regímenes** (bottom-15 por score: +1.755% vs +1.540%
+OOS, +1.229% vs +0.740% IS) — el score no está débilmente correlacionado, está
+**invertido**. La cadena `momentum (+1.540%) ≈ random survivors (+1.549%) > índice sin
+supervivencia (+1.119%)` explica el número entero: **el edge aparente ES el sesgo de
+supervivencia**. En el régimen vigente pierde contra no hacer nada (control ETF
++1.013% vs +0.740%) con **4× el drawdown** y 2× el turnover; LOYO peor año 2024 → −0.042%.
+**`donchian_breakout` no muere: la señal bate su placebo condicionado** (días
+casi-ruptura: cierre en el decil alto del rango 20d sin superarlo) en ambos regímenes,
+**84.0 / 83.5** — pero no llega al piso de 90, el jackknife se lleva la mitad en IS
+(+0.874% → +0.433%, 40/60 símbolos +), y **el ranking que el vivo opera destruye
+valor**: en IS el quintil de ruptura más FUERTE —lo primero que compra— rinde
+**−0.534%** contra **+0.659%** del más débil. Con ~248 rupturas/año, hold ≈28d y 10
+slots, el libro está permanentemente lleno **racionando hacia el peor tranche**. La
+única celda del estudio que cruza 90 pct es el control ETF (92.0, maxL −6.5%) — la que
+el caballo NO opera.
+**Despliegue NO tocado.** Recomendación: **matar `momentum_rotation`** (no es afinable;
+invertir el score sería curve-fitting contra el mismo sesgo que lo produjo, error de
+F4); **no matar donchian** pero medir rankings alternativos en un estudio aparte con su
+propio OOS (cambio de tesis, no plomería).
+Harness: `events/trend_audit.py` (+ `tests/test_trend_audit.py`).
+Postmortem: `docs/postmortems/2026-08-05-trend-horses-live-audit-r4.md`.
+
+> **Reglas de método nuevas:** (1) **para un long-only el placebo es otra canasta del
+> mismo universo, no días random** — un control de días-random le regala el retorno de
+> estar invertido en un bull y cualquier regla cruza el pct 90. (2) **Si el control
+> random-name iguala a la regla y ambos baten al índice sin supervivencia, lo medido es
+> el sesgo**: la firma es `regla ≈ random-survivors > índice`. (3) **Una regla
+> desplegada cuyo backtest registrado tiene otra forma (per-symbol vs cross-sectional)
+> NO tiene backtest** — no es "validada con un defecto", es no validada. (4) **El
+> tranche que elige el racionamiento puede tener el signo contrario** (2ª confirmación
+> de la lección 4 de R3, ahora con signo negativo explícito). (5) **Toda perilla que
+> sólo existe en el vivo es deuda de validación** — el cap sectorial vale ~20 puntos de
+> percentil en OOS y nadie lo gateó.
+
 > **Estado del loop:** sin carril PENDIENTE que drenar. COLA GORDA agotado (F1-F4),
 > E2/E3 BLOCKED-DATA, FOMC y daily-bar son pozos secos declarados. **Lo que el loop
 > puede hacer sin decisión de Luis es auditar lo desplegado contra la barra vigente**
-> (esto fue R1 y R2 — y R2 dejó el patrón claro: **lo desplegado sin backtest es la
-> primera cola a drenar**). Lo que necesita decisión: matar el reactor (R2), abrir
-> carril opciones, o desbloquear E2/E3 con datos.
+> (esto fue R1, R2, R3 y R4 — patrón: **lo desplegado sin backtest vigente es la primera
+> cola a drenar**). **Con R4 el field desplegado queda 100% auditado:** los 5 caballos
+> (`confirmed_mr`, `rsi_mr`, `momentum_rotation`, `donchian_breakout`, `opex_drift`) más
+> el news reactor pasaron por la barra vigente. **Ningún caballo del field daily-bar
+> sobrevive limpio**; la única celda del repo que aguanta todo sigue siendo QQQ-OpEx (R1).
+> Lo que necesita decisión: matar el reactor (R2), matar `momentum_rotation` (R4), pasar
+> `spy_close` al vivo (R3), abrir carril opciones, o desbloquear E2/E3 con datos.
 
 ## Prioridad (histórico)
 
