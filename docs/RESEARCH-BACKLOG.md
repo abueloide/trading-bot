@@ -229,6 +229,45 @@ Postmortem: `docs/postmortems/2026-08-06-donchian-ranking-r5.md`.
 > antes de discutir la señal**: con 9% de fill, un estudio per-trade describe una regla
 > que el vivo casi nunca ejecuta.
 
+### R6 — ¿C2 sobrevive el null best-of-k? · HECHO · PASS ✅ (2026-08-07)
+La deuda que R5 dejó marcada como **retroactiva a todo el repo** (con k hipótesis el
+null es el máximo de k), aplicada a la única celda que aguanta todo y que **está
+desplegada**. C2 nació de un barrido de **18 celdas** (3 sym × 3 ventanas × 2 modos) y
+todos sus percentiles se midieron contra el null de su propia celda.
+El null corre **el barrido completo sobre cada uno de 1,000 calendarios-placebo** (no
+remuestrea una distribución: así la correlación entre celdas queda dentro del null), y
+un sorteo que no produce candidata **no aporta** su máximo.
+**C2 PASA:** pct max-t **97.8** (k=18) y la celda EN VIVO (QQQ long-only w=1) **99.7**
+(k=3) / **99.6** (k=9, la familia honesta que también cuenta la ventana). z=+2.52
+contra su propio null. Estable en 3 semillas. **Primera cosa del repo que sobrevive la
+corrección por multiplicidad** — el despliegue queda confirmado, no tocado.
+**Pero muere el titular:** el argumento que vendía a C2 (*"la primera hipótesis que
+cruza el gate en AMBOS regímenes"*) no vale nada — **~50% de los calendarios-placebo
+producen ≥1 celda de 18 que "pasa el gate en ambos regímenes"**. Con gate laxo y k=18,
+cruzar ambos regímenes es una moneda al aire; lo que sostiene a C2 es la MAGNITUD
+contra su propio null, no el badge.
+**Defecto de método encontrado a mitad:** el máximo CRUDO daba 83.6 (reprobado) porque
+lo gana casi siempre una celda de 5d — 5× la escala de una de 1d por pura exposición.
+Se estudentiza cada celda contra su propio null antes de maximizar (max-t), y para no
+autoengañarse se ancló con una familia **homogénea** (sólo w=1, k=6) donde el crudo SÍ
+es válido: pasa igual (95.0). Harness: `events/opex_multiplicity.py` (+ 13 tests).
+Postmortem: `docs/postmortems/2026-08-07-c2-multiplicity-r6.md`.
+
+> **Reglas de método nuevas:** (1) **el máximo crudo de k sólo vale si la familia es
+> homogénea en escala** — mezclar ventanas/holdings hace que el máximo lo gane siempre
+> la celda más grande y se rechacen celdas chicas legítimas; estandarizar contra el
+> null de cada celda antes de maximizar (max-t). Retroactiva, igual que la de R5.
+> (2) **si cambias de estadístico después de ver un número, ancla con una sub-familia
+> donde el estadístico viejo siga siendo válido** — si no, el resultado es
+> indistinguible de haber buscado el número que gusta. (3) **"pasa en ambos regímenes"
+> no es evidencia sin su k**: medir la tasa a la que el null produce ≥1 celda que pasa.
+> (4) **Un hallazgo que CONFIRMA lo desplegado también se escribe** — cinco auditorías
+> seguidas terminando en "matar" convierten al loop en máquina de matar, no en medición.
+>
+> **Deuda que R6 anota y NO mide:** la multiplicidad **entre eventos**. OpEx se eligió
+> después de que FOMC muriera 3 veces; R6 corrige dentro del evento, no entre eventos.
+> Con ~50% de tasa de falso positivo por familia, esa corrección no es cosmética.
+
 > **Estado del loop:** sin carril PENDIENTE que drenar. COLA GORDA agotado (F1-F4),
 > E2/E3 BLOCKED-DATA, FOMC y daily-bar son pozos secos declarados. **Lo que el loop
 > puede hacer sin decisión de Luis es auditar lo desplegado contra la barra vigente**
@@ -246,6 +285,12 @@ Postmortem: `docs/postmortems/2026-08-06-donchian-ranking-r5.md`.
 > necesita una decisión de Luis** (aplicar alguna de las 4 recomendaciones vivas, abrir
 > el carril de opciones, o conseguir los datos de E2/E3). El loop no tiene item que
 > drenar sin una de esas.
+>
+> **R6 (2026-08-07) drenó la última deuda de método sin decisión:** la regla retroactiva
+> de R5 aplicada a C2, la única celda viva. **C2 sobrevive** (max-t 97.8/99.6) — el
+> field daily-bar no tiene sobrevivientes, pero el carril event sí tiene uno. La cola
+> vuelve a quedar vacía; lo único que R6 deja abierto (multiplicidad **entre eventos**)
+> no es drenable sin abrir un carril nuevo, que es decisión de Luis.
 
 ## Prioridad (histórico)
 
