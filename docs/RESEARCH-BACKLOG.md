@@ -192,6 +192,43 @@ Postmortem: `docs/postmortems/2026-08-05-trend-horses-live-audit-r4.md`.
 > sólo existe en el vivo es deuda de validación** — el cap sectorial vale ~20 puntos de
 > percentil en OOS y nadie lo gateó.
 
+### R5 — ¿el ranking de `donchian_breakout` informa? · HECHO · FAIL ❌ (2026-08-06)
+El único item que R4 dejó abierto y drenable sin decisión de Luis. Se simula **el libro
+que corre** (10 slots, salida por mínimo de 10d, réplica de `_run_slot_filler`), no
+trades pooled. Primer número que enmarca todo: **el caballo ejecuta el 8.8-10.4% de las
+señales que dispara** — nueve de cada diez rupturas nunca se compran, así que lo que
+entrega es `señal + ranking + capacidad`.
+**Ningún criterio informa.** k=5 pre-registrados (`strength` = el vivo, `strength_inv`,
+`atr_strength`, `lowvol`, `trend`) contra un NULL de **prioridad al azar entre las
+señales del mismo día** (mismo universo, mismas señales, misma capacidad, mismos días:
+sólo cambia a quién le toca el slot). El mejor (`strength_inv`) queda en pct **47.5**
+OOS / **23.2** IS contra el **máximo de 5 rankings al azar** — contra el null simple se
+veía 86.7/74.0, o sea **el ganador es exactamente lo que produce probar cinco cosas**; y
+su jackknife −3 es **negativo** en IS.
+**Pero el ranking del vivo está del lado malo en AMBOS regímenes:** `strength` es el
+peor/penúltimo de los cinco y queda **bajo el racionamiento neutral** (pct 33 OOS, 15
+IS). En el régimen vigente cuesta **~2.0pp anuales** (+1.70%/año vs +3.72% de tirar una
+moneda). Signo consistente con R4 (quintil fuerte −0.534% vs débil +0.659%), ahora con
+otro harness y sobre el libro completo.
+No resucita al caballo (R4 lo dejó en placebo 84/83.5 vs piso 90). **Despliegue NO
+tocado.** Recomendación: **neutralizar el ranking** de `breakout_candidates` (orden
+arbitrario estable en vez de fuerza DESC) — plomería con dirección validada en dos
+regímenes y dos harnesses, y **no es curve-fitting porque la acción es volver al null**,
+no elegir al ganador. Alternativa igual de válida: matarlo por lo de R4.
+Harness: `events/ranking_study.py` (+ `tests/test_ranking_study.py`).
+Postmortem: `docs/postmortems/2026-08-06-donchian-ranking-r5.md`.
+
+> **Reglas de método nuevas:** (1) **con k hipótesis, el null es el máximo de k** — el
+> mejor de 5 cruza el pct 90 el 41% de las veces (1−0.9⁵) contra un null de una sola
+> corrida; todo barrido que reporte el percentil de su ganador contra un null simple
+> reporta el percentil equivocado (aplica retroactivamente a los barridos del repo).
+> (2) **Cuando la capacidad muerde, el placebo se sortea DENTRO del evento**: mismas
+> señales, mismos días, mismos slots, sólo cambia la prioridad. (3) **Un hallazgo
+> negativo sí tiene acción desplegable si la acción es volver al null** — la prueba es
+> que la acción no necesita mirar el dato para especificarse. (4) **Medir el fill rate
+> antes de discutir la señal**: con 9% de fill, un estudio per-trade describe una regla
+> que el vivo casi nunca ejecuta.
+
 > **Estado del loop:** sin carril PENDIENTE que drenar. COLA GORDA agotado (F1-F4),
 > E2/E3 BLOCKED-DATA, FOMC y daily-bar son pozos secos declarados. **Lo que el loop
 > puede hacer sin decisión de Luis es auditar lo desplegado contra la barra vigente**
@@ -201,7 +238,14 @@ Postmortem: `docs/postmortems/2026-08-05-trend-horses-live-audit-r4.md`.
 > el news reactor pasaron por la barra vigente. **Ningún caballo del field daily-bar
 > sobrevive limpio**; la única celda del repo que aguanta todo sigue siendo QQQ-OpEx (R1).
 > Lo que necesita decisión: matar el reactor (R2), matar `momentum_rotation` (R4), pasar
-> `spy_close` al vivo (R3), abrir carril opciones, o desbloquear E2/E3 con datos.
+> `spy_close` al vivo (R3), **neutralizar el ranking de donchian (R5)**, abrir carril
+> opciones, o desbloquear E2/E3 con datos.
+>
+> **Con R5 se cierra también la cola de "perillas desplegadas sin gate"** que el patrón
+> de auditoría había abierto. La cola de research queda vacía: **todo lo que sigue
+> necesita una decisión de Luis** (aplicar alguna de las 4 recomendaciones vivas, abrir
+> el carril de opciones, o conseguir los datos de E2/E3). El loop no tiene item que
+> drenar sin una de esas.
 
 ## Prioridad (histórico)
 
