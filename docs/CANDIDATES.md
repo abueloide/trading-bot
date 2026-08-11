@@ -147,3 +147,33 @@ sacar IVV del universo, o dejarlo como **control interno** (si IVV replica a QQQ
 en vivo, la tesis de microestructura específica era mentira). Recomendación:
 dejarlo como control — no cuesta nada y vale más como control que como caballo.
 Detalle: `docs/postmortems/2026-07-31-c2-opex-reaudit.md`.
+
+---
+
+### MULTIPLICIDAD 2026-08-07 (R6) — sobrevive ✅, pero el titular de arriba es falso ❌
+
+La regla de R5 (*con k hipótesis el null es el máximo de k*) aplicada a C2, que nació
+de un barrido de **18 celdas** y midió todos sus percentiles contra el null de su
+propia celda. Null = **el barrido completo corrido sobre 1,000 calendarios-placebo**.
+
+| Familia | k | pct max-t | |
+|---|---|---|---|
+| La que **seleccionó** a C2 (2 patas, 3 sym × 3 w × 2 modos) | 18 | **97.8** | ✅ |
+| La regla **en vivo** long-only (3 símbolos) | 3 | **99.7** | ✅ |
+| La regla en vivo, familia **honesta** (+ ventanas) | 9 | **99.6** | ✅ |
+| Ancla **homogénea** (sólo w=1, máximo crudo válido sin estudentizar) | 6 | 95.0 crudo | ✅ |
+
+**C2 es lo primero del repo que sobrevive la corrección por multiplicidad** (z=+2.52
+contra su propio null; estable en 3 semillas). El despliegue queda confirmado.
+
+**Lo que muere es el argumento de venta.** Arriba se lee *"la primera hipótesis
+event-driven que cruza el gate en los DOS regímenes"*, y ese fue el motivo por el que
+C2 se separó de las 3 variantes FOMC. El null lo mide directo: **~50% de los
+calendarios-placebo producen ≥1 celda de 18 que "pasa el gate en ambos regímenes"**.
+Con un gate laxo a propósito y k=18, ese badge es una moneda al aire y no debe volver a
+usarse como justificación. Lo que sostiene a C2 es la **magnitud de su celda contra su
+propio null**, no el cruce de regímenes.
+
+**Deuda anotada, no medida:** la multiplicidad **entre eventos** (OpEx se eligió después
+de que FOMC muriera 3 veces). R6 corrige dentro del evento, no entre eventos.
+Detalle: `docs/postmortems/2026-08-07-c2-multiplicity-r6.md`.
