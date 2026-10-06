@@ -65,3 +65,23 @@ def test_bias_uses_only_prior_sessions():
     assert daily_bias(closes, closes.index[25]) == 1
     assert daily_bias(closes[::-1].set_axis(closes.index), closes.index[25]) == -1
     assert daily_bias(closes, closes.index[5]) == 0
+
+
+def test_book_day_realizes_round_trip_and_refuses_open_position():
+    from datetime import date
+    from types import SimpleNamespace as NS
+
+    from live.ict_runner import book_day, position_size
+
+    def fill(side, qty, px):
+        return NS(side=NS(value=side), filled_qty=str(qty), filled_avg_price=str(px))
+
+    state = {"realized_pnl": 0.0, "trades": []}
+    trade = book_day(state, [fill("sell", 100, 600.0), fill("buy", 100, 598.0)], date(2026, 10, 6))
+    assert trade["side"] == -1 and trade["pnl"] == 200.0 and state["realized_pnl"] == 200.0
+    # still holding shares -> nothing booked
+    assert book_day(state, [fill("buy", 100, 600.0)], date(2026, 10, 7)) is None
+    assert state["realized_pnl"] == 200.0
+    # 1% risk would be 250 shares; the 4x notional cap (100k/600) binds first.
+    assert position_size(25_000, 600.0, 1.0) == 166
+    assert position_size(25_000, 600.0, 5.0) == 50
