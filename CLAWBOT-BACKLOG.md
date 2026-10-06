@@ -2,6 +2,16 @@
 
 > Pendientes operativos de este workspace (paper horse-race en prod). Editable por operador y bot. Sacado de memoria 2026-06-02. **NO dinero real sin edge probado.**
 
+## ESTADO 2026-10-06 — reconfiguración pedida por Luis (pisa lo de abajo donde choque)
+
+- **Corren 3 estrategias, todo en paper:** `momentum_rotation` + `confirmed_mr` (job diario 13:00 CST, `com.luisfer.horserace`) y la **intradía ICT** del reel (`live/ict_runner.py`, QQQ con SPY como par SMT, `com.luisfer.ictrunner` 07:20 CST L-V, libros en `data/ict/`).
+- **Retiradas:** `rsi_mr`, `donchian_breakout`, `opex_drift` y el news reactor (`com.luisfer.newsreactor.plist.disabled`). Posiciones vendidas por qty exacta con `scripts/retire_strategies.py`; ledgers archivados en `data/ledgers/retired-*.json`; respaldo previo en `data/backups/20261006-1128/`.
+- **Backtest ICT (2 años, 5m, sin tunear):** 113 trades, 39.8% aciertos, +0.07R promedio, +0.35% vs QQQ +55%. Sin edge medible; corre forward porque Luis lo pidió. **No tunear parámetros para "arreglarlo"** (sobreajuste). Reproducir: `.venv-bt/bin/python backtesting/ict_backtest.py`.
+- **Reportes diarios a Telegram** (apertura y cierre) salen de `run_ict.sh` → `scripts/send_report.sh` → `openclaw --profile trading message send`. Sin LLM: el cron aislado del gateway no tenía shell.
+- **Gateway `trading` re-encendido** (requirió `openclaw --profile trading doctor --fix`). Los 6 crons viejos (research loop, scrum, reportes) NO migraron; no recrearlos sin que Luis lo pida.
+- [ ] Verificar la primera corrida del job diario con 2 estrategias (`data/cron.log`, 2026-10-06 13:00).
+- [ ] Verificar el primer cierre real del runner ICT con operación (`data/ict/journal.jsonl`): fill del bracket, flatten 15:55 ET y P&L en `data/ict/state.json`.
+
 ## Vigilancia activa (paper)
 
 - [ ] **Verificar `data/cron.log`** tras las 13:00 CST (LaunchAgent `com.luisfer.horserace`). Confirmar que las corridas L-V se ejecutan.
