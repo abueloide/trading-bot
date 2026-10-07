@@ -22,3 +22,7 @@ graphify-out/
 
 # Reactor de noticias: ledger y journal son estado vivo, no código
 data/news_reactor/
+
+# Estado del bot (OpenClaw), no código
+DREAMS.md
+memory/
