@@ -73,18 +73,10 @@ _EXTRA_SYMBOLS = list(
 STRATEGIES = [
     StrategyConfig("momentum_rotation", UNIVERSE, SLICE, max_positions=15),
     StrategyConfig("confirmed_mr", UNIVERSE, SLICE, max_positions=10),
-    StrategyConfig("rsi_mr", UNIVERSE, SLICE, max_positions=10),
-    # 4th horse (2026-06-25): Donchian 20/10 breakout — a trend-following style
-    # distinct from momentum (6m winners) and mean-reversion (oversold dips).
-    StrategyConfig("donchian_breakout", UNIVERSE, SLICE, max_positions=10),
-    # C2 — OpEx 1d-drift (long-only). Universo fijo SPY/QQQ: es una anomalía de
-    # microestructura de índices, no un screen sobre el S&P 500. IVV (no SPY):
-    # SPY es el benchmark y la invariante dice que la vara no se opera; IVV sigue
-    # el mismo indice y replica el edge medido (+0.06%/+0.56% por evento).
-    # max_positions=6 (no 2) es SIZING, no un limite de nombres: el peso es
-    # slice/slots, y con 2 slots cada nombre pesaria 25% > cap duro de 20% y el
-    # risk gate VETA la orden (verificado 2026-07-26). Con 6 -> 16.7%, pasa.
-    StrategyConfig("opex_drift", ["IVV", "QQQ"], SLICE, max_positions=6),
+    # 2026-10-06 (decisión de Luis): rsi_mr, donchian_breakout y opex_drift
+    # retirados vía scripts/retire_strategies.py (ledgers archivados en
+    # data/ledgers/retired-*.json). Quedan momentum + confirmed_mr; la estrategia
+    # intradía ICT corre aparte (live/ict_runner.py) con su propio ledger.
     # NOTE: a 4th horse (momentum_news) was retired 2026-06-13. It paired the
     # momentum engine with an AlphaVantage NEWS_SENTIMENT veto, but the free tier
     # cannot serve it: NEWS_SENTIMENT returns 0 articles for a multi-ticker basket
