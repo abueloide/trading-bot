@@ -27,6 +27,7 @@ MX = ZoneInfo("America/Mexico_City")
 MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 STATE = REPO / "data/ledgers/state.json"
 ICT_STATE = REPO / "data/ict/state.json"
+ICTD_STATE = REPO / "data/ict_daily/state.json"
 RACE_INCEPTION = "2026-06-25"
 NAMES = {
     "momentum_rotation": "Rotación por momentum",
@@ -112,6 +113,17 @@ def main() -> int:
             f"({_pct((equity / ict['starting_cash'] - 1) * 100)} desde el {_fecha(datetime.fromisoformat(ict['inception']))}, "
             f"{n} operaciones, {wins} ganadas)"
         )
+    ictd = json.loads(ICTD_STATE.read_text()) if ICTD_STATE.exists() else None
+    if ictd:
+        equity = ictd["starting_cash"] + ictd["realized_pnl"]
+        n = len(ictd["trades"])
+        wins = sum(1 for t in ictd["trades"] if t["pnl"] > 0)
+        lines.append(
+            f"• Reel forzado (QQQ, 1 op/día): {_money(equity)} "
+            f"({_pct((equity / ictd['starting_cash'] - 1) * 100)} desde el {_fecha(datetime.fromisoformat(ictd['inception']))}, "
+            f"{n} operaciones, {wins} ganadas)"
+        )
+
     lines += ["", f"S&P 500 desde el 25-jun: {_pct(spy_pct)}", f"Total de las tres: {_money(total)}"]
 
     if ict:

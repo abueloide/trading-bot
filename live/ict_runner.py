@@ -121,6 +121,29 @@ class Broker:
     def order(self, order_id: str):
         return self.trading.get_order_by_id(order_id)
 
+    def last_price(self, symbol: str) -> float:
+        """Latest IEX trade price; 0.0 if unavailable (used by the forced-daily sibling)."""
+        from alpaca.data.requests import StockLatestTradeRequest
+        try:
+            t = self.data.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=symbol, feed="iex"))
+            return float(t[symbol].price)
+        except Exception as e:
+            logger.warning("last_price %s: %s", symbol, e)
+            return 0.0
+
+    def submit_market_stop(self, symbol: str, side: int, qty: int, stop: float, client_id: str) -> str:
+        """Market entry with a protective stop (OTO) — the forced-daily sibling's one shot."""
+        from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
+        from alpaca.trading.requests import MarketOrderRequest, StopLossRequest
+
+        order = self.trading.submit_order(MarketOrderRequest(
+            symbol=symbol, qty=qty,
+            side=OrderSide.BUY if side > 0 else OrderSide.SELL,
+            time_in_force=TimeInForce.DAY, order_class=OrderClass.OTO,
+            stop_loss=StopLossRequest(stop_price=stop), client_order_id=client_id,
+        ))
+        return str(order.id)
+
     def cancel(self, order_id: str) -> None:
         try:
             self.trading.cancel_order_by_id(order_id)
