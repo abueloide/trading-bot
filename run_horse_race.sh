@@ -16,6 +16,16 @@ cd "$REPO" || { echo "repo not found: $REPO"; exit 1; }
 mkdir -p data
 {
   echo "================ $(date '+%Y-%m-%d %H:%M:%S %Z') ================"
-  "$REPO/.venv-bt/bin/python" run_trading_system.py
-  echo "exit: $?"
+  OUTPUT="$("$REPO/.venv-bt/bin/python" run_trading_system.py 2>&1)"
+  STATUS=$?
+  echo "$OUTPUT"
+  echo "exit: $STATUS"
 } >> data/cron.log 2>&1
+
+# Alerta inmediata (no solo log mudo): una posición abierta sin precio fresco
+# contamina el equity de ese horse en silencio si nadie lee cron.log a mano.
+STALE_LINE="$(echo "$OUTPUT" | grep "HELD symbols missing a fresh mark" || true)"
+if [ -n "$STALE_LINE" ]; then
+  openclaw --profile trading message send --channel telegram --target 7266808827 \
+    -m "⚠️ horse-race: $STALE_LINE" >> data/cron.log 2>&1
+fi

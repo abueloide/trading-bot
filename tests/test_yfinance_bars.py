@@ -57,3 +57,34 @@ def test_batch_multi_ticker_multiindex(monkeypatch):
     out = YFinanceBars().get_bars_batch(["SPY", "AAPL", "MSFT"], 260)
     assert set(out) == {"SPY", "AAPL", "MSFT"}
     assert len(out["AAPL"]) == 260
+
+
+def test_batch_retries_symbols_missing_after_transient_dns_failure(monkeypatch):
+    """A symbol that fails the first pass (e.g. DNS blip) recovers on retry.
+
+    2026-11-20 incident: query2.finance.yahoo.com was unresolvable mid-run,
+    58/503 symbols came back missing, and 2 HELD symbols (STT, URI) got
+    valued at entry cost. Retrying just the missing symbols should recover
+    them without re-downloading the whole universe.
+    """
+    monkeypatch.setattr("live.yfinance_bars.time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def fake_download(tickers, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("Could not resolve host: query2.finance.yahoo.com")
+        return _multiindex_frame(tickers)
+
+    monkeypatch.setattr("live.yfinance_bars.yf.download", fake_download)
+    out = YFinanceBars().get_bars_batch(["SPY", "AAPL"], 260)
+    assert set(out) == {"SPY", "AAPL"}
+    assert calls["n"] == 2  # 1 failed pass + 1 successful retry, no second backoff needed
+
+
+def test_batch_gives_up_after_retries_exhausted(monkeypatch):
+    """A genuinely delisted/missing symbol stays out after all retries, no crash."""
+    monkeypatch.setattr("live.yfinance_bars.time.sleep", lambda s: None)
+    monkeypatch.setattr("live.yfinance_bars.yf.download", lambda tickers, **kw: None)
+    out = YFinanceBars().get_bars_batch(["DEADTICKER"], 260)
+    assert out == {}
