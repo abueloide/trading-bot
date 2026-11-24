@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
 from typing import Dict, List, Optional
 
@@ -13,6 +14,11 @@ logger = logging.getLogger(__name__)
 _RENAME = {"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}
 _REQUIRED = {"open", "high", "low", "close", "volume"}
 _BATCH_CHUNK = 100  # symbols per yf.download call — one network round-trip per chunk.
+# Retry backoff (seconds) for symbols still missing after the first pass. DNS
+# blips (Could not resolve host: query2.finance.yahoo.com) are transient and
+# usually clear within a few seconds; a real delisting just fails again, cheap
+# since only the missing symbols (not the whole universe) are retried.
+_RETRY_BACKOFFS_S = (5, 15)
 
 
 def _normalize(raw: Optional[pd.DataFrame], lookback: int) -> Optional[pd.DataFrame]:
@@ -68,50 +74,71 @@ class YFinanceBars:
             logger.warning("yfinance returned no usable bars for %s", symbol)
         return out
 
+    def _download_chunk(self, chunk: List[str], period_days: int, lookback: int,
+                         out: Dict[str, pd.DataFrame], chunk_label: str) -> None:
+        """Download one chunk and merge any usable symbols into ``out`` in place."""
+        try:
+            raw = yf.download(
+                tickers=chunk,
+                period=f"{period_days}d",
+                interval="1d",
+                group_by="ticker",
+                auto_adjust=True,
+                threads=True,
+                progress=False,
+            )
+        except Exception as e:
+            logger.warning("batch download failed for chunk %s (%d syms): %s", chunk_label, len(chunk), e)
+            return
+        if raw is None or raw.empty:
+            return
+        # group_by="ticker" yields MultiIndex (ticker, field) columns — even
+        # for a single ticker, so we always index by symbol when the columns
+        # are MultiIndexed. A flat frame only maps to a lone-symbol chunk.
+        multiindexed = isinstance(raw.columns, pd.MultiIndex)
+        for sym in chunk:
+            if multiindexed:
+                try:
+                    sub = raw[sym]
+                except (KeyError, IndexError):
+                    continue
+            else:
+                sub = raw if len(chunk) == 1 else None
+            if sub is None:
+                continue
+            norm = _normalize(sub, lookback)
+            if norm is not None:
+                out[sym] = norm
+
     def get_bars_batch(self, symbols: List[str], lookback: int) -> Dict[str, pd.DataFrame]:
         """One snapshot of the whole universe: yf.download in chunks of ~100.
 
         Per-symbol fetching 500 names rate-limits Yahoo fast; batching collapses
-        each chunk into a single round-trip. Symbols with no usable data are
-        simply omitted from the returned dict (callers already guard on missing).
+        each chunk into a single round-trip. Symbols still missing after the
+        first pass are retried (with backoff) — a transient DNS/network blip can
+        otherwise silently strand a HELD symbol without a fresh mark. Symbols
+        with no usable data after retries are omitted (callers already guard on
+        missing).
         """
         period_days = int(lookback * 1.6) + 10
         out: Dict[str, pd.DataFrame] = {}
         unique = list(dict.fromkeys(symbols))  # dedupe, preserve order
         for i in range(0, len(unique), _BATCH_CHUNK):
             chunk = unique[i:i + _BATCH_CHUNK]
-            try:
-                raw = yf.download(
-                    tickers=chunk,
-                    period=f"{period_days}d",
-                    interval="1d",
-                    group_by="ticker",
-                    auto_adjust=True,
-                    threads=True,
-                    progress=False,
-                )
-            except Exception as e:
-                logger.warning("batch download failed for chunk %d (%d syms): %s", i, len(chunk), e)
-                continue
-            if raw is None or raw.empty:
-                continue
-            # group_by="ticker" yields MultiIndex (ticker, field) columns — even
-            # for a single ticker, so we always index by symbol when the columns
-            # are MultiIndexed. A flat frame only maps to a lone-symbol chunk.
-            multiindexed = isinstance(raw.columns, pd.MultiIndex)
-            for sym in chunk:
-                if multiindexed:
-                    try:
-                        sub = raw[sym]
-                    except (KeyError, IndexError):
-                        continue
-                else:
-                    sub = raw if len(chunk) == 1 else None
-                if sub is None:
-                    continue
-                norm = _normalize(sub, lookback)
-                if norm is not None:
-                    out[sym] = norm
+            self._download_chunk(chunk, period_days, lookback, out, chunk_label=str(i))
+
+        missing = [s for s in unique if s not in out]
+        for attempt, backoff in enumerate(_RETRY_BACKOFFS_S, start=1):
+            if not missing:
+                break
+            logger.warning("retry %d/%d: %d symbols still missing bars, backing off %ds: %s",
+                            attempt, len(_RETRY_BACKOFFS_S), len(missing), backoff, ", ".join(missing))
+            time.sleep(backoff)
+            for i in range(0, len(missing), _BATCH_CHUNK):
+                chunk = missing[i:i + _BATCH_CHUNK]
+                self._download_chunk(chunk, period_days, lookback, out, chunk_label=f"retry{attempt}-{i}")
+            missing = [s for s in unique if s not in out]
+
         logger.info("batch bars: %d/%d symbols returned usable data", len(out), len(unique))
         return out
 
